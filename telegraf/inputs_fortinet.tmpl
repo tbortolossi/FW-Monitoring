@@ -1,0 +1,344 @@
+# --------------------------
+# File: inputs_fortinet.tmpl
+# --------------------------
+
+{{- range $fw := .firewalls }}
+{{- if eq $fw.vendor "fortinet" }}
+###############################################################################
+# {{$fw.hostname}} ({{$fw.host}}) - Fortinet
+###############################################################################
+[[inputs.snmp]]
+  agents = ["udp://{{ $fw.host }}:161"]
+  version = {{ $fw.snmp_version }}
+  agent_host_tag = "source"
+  {{- if eq $fw.snmp_version 2 }}
+  community = "{{ $fw.community }}"
+  {{- else if eq $fw.snmp_version 3 }}
+  sec_name = "{{ $fw.username }}"
+  auth_protocol = "{{ $fw.telegraf_auth_protocol }}"
+  auth_password = "{{ $fw.auth_password }}"
+  priv_protocol = "{{ $fw.telegraf_priv_protocol }}"
+  priv_password = "{{ $fw.priv_password }}"
+  sec_level = "authPriv"
+  {{- end }}
+
+  name = "fortinet_system"
+  timeout = "5s"
+  retries = 3
+
+  [inputs.snmp.tags]
+    vendor = "fortinet"
+    {{- if ($fw.cluster | default "") }}
+    cluster = "{{ $fw.cluster }}"
+    {{- end }}
+    {{- if ($fw.model | default "") }}
+    model = "{{ $fw.model }}"
+    {{- end }}
+
+  [[inputs.snmp.field]]
+    oid    = "RFC1213-MIB::sysName.0"
+    name   = "hostname"
+    is_tag = true
+
+  [[inputs.snmp.field]]
+    oid  = "RFC1213-MIB::sysUpTime.0"
+    name = "uptime"
+
+  [[inputs.snmp.field]]
+    oid  = "RFC1213-MIB::sysDescr.0"
+    name = "system_description"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-CORE-MIB::fnSysSerial.0"
+    name = "serial_number"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysVersion.0"
+    name = "fortios_version"
+
+  # CPU global (%)
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysCpuUsage.0"
+    name = "cpu_pct"
+
+  # Used memory (%)
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysMemUsage.0"
+    name = "mem_pct"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysMemCapacity.0"
+    name = "mem_capacity_kb"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysDiskUsage.0"
+    name = "disk_used_mb"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysDiskCapacity.0"
+    name = "disk_capacity_mb"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysLowMemUsage.0"
+    name = "lowmem_used_kb"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysLowMemCapacity.0"
+    name = "lowmem_capacity_kb"
+
+  # Global active sessions
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysSesCount.0"
+    name = "sessions_active"
+	
+  # Connections per second (1 minute average)
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysSesRate1.0"
+    name = "cps_1min_avg"	
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysSesRate10.0"
+    name = "cps_10min_avg"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysSesRate30.0"
+    name = "cps_30min_avg"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysSesRate60.0"
+    name = "cps_60min_avg"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysSes6Count.0"
+    name = "ipv6_sessions_active"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgDataCpuUsage.0"
+    name = "data_cpu_pct"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgDataMemUsage.0"
+    name = "data_mem_pct"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysNpuSesCount.0"
+    name = "npu_sessions_active"
+
+  [[inputs.snmp.field]]
+    oid  = "FORTINET-FORTIGATE-MIB::fgSysNpuSesRate1.0"
+    name = "npu_cps_1min_avg"
+
+  [[inputs.snmp.field]]
+    oid  = ".1.3.6.1.4.1.12356.101.13.1.1.0"
+    name = "ha_mode"
+
+  # Standard IF-MIB interface table (64-bit counters)
+  # Global throughput should be calculated from these interface
+  # octet counters, not from NPU/dataplane feature counters.
+  [[inputs.snmp.table]]
+    name         = "interfaces"
+    inherit_tags = ["hostname"]
+    oid          = "IF-MIB::ifXTable"
+
+    [[inputs.snmp.table.field]]
+      oid    = "IF-MIB::ifName"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid    = "IF-MIB::ifDescr"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid       = "IF-MIB::ifHCInOctets"
+      name      = "ifHCInOctets"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid       = "IF-MIB::ifHCOutOctets"
+      name      = "ifHCOutOctets"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid       = "IF-MIB::ifHCInUcastPkts"
+      name      = "ifHCInUcastPkts"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid       = "IF-MIB::ifHCOutUcastPkts"
+      name      = "ifHCOutUcastPkts"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid       = "IF-MIB::ifHCInMulticastPkts"
+      name      = "ifHCInMulticastPkts"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid       = "IF-MIB::ifHCOutMulticastPkts"
+      name      = "ifHCOutMulticastPkts"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid       = "IF-MIB::ifHCInBroadcastPkts"
+      name      = "ifHCInBroadcastPkts"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid       = "IF-MIB::ifHCOutBroadcastPkts"
+      name      = "ifHCOutBroadcastPkts"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid  = "IF-MIB::ifHighSpeed"
+      name = "ifHighSpeed"
+
+    [[inputs.snmp.table.field]]
+      oid  = "IF-MIB::ifOperStatus"
+      name = "ifOperStatus"
+
+    [[inputs.snmp.table.field]]
+      oid  = "IF-MIB::ifAdminStatus"
+      name = "ifAdminStatus"
+
+    [[inputs.snmp.table.field]]
+      oid  = "IF-MIB::ifInErrors"
+      name = "ifInErrors"
+
+    [[inputs.snmp.table.field]]
+      oid  = "IF-MIB::ifOutErrors"
+      name = "ifOutErrors"
+
+    [[inputs.snmp.table.field]]
+      oid  = "IF-MIB::ifInDiscards"
+      name = "ifInDiscards"
+
+    [[inputs.snmp.table.field]]
+      oid  = "IF-MIB::ifOutDiscards"
+      name = "ifOutDiscards"
+
+  [[inputs.snmp.table]]
+    name         = "fortinet_vdoms"
+    inherit_tags = ["hostname"]
+    oid          = "FORTINET-FORTIGATE-MIB::fgVdTable"
+    index_as_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid    = "FORTINET-FORTIGATE-MIB::fgVdEntName"
+      name   = "vdom"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgVdEntOpMode"
+      name = "op_mode"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgVdEntHaState"
+      name = "ha_state"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgVdEntCpuUsage"
+      name = "cpu_pct"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgVdEntMemUsage"
+      name = "mem_pct"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgVdEntSesCount"
+      name = "sessions_active"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgVdEntSesRate"
+      name = "cps"
+
+  [[inputs.snmp.table]]
+    name         = "fortinet_processors"
+    inherit_tags = ["hostname"]
+    oid          = "FORTINET-FORTIGATE-MIB::fgProcessorTable"
+    index_as_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorUsage"
+      name = "cpu_pct_1min"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorUsage5sec"
+      name = "cpu_pct_5sec"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorContainedIn"
+      name = "contained_in"
+
+    [[inputs.snmp.table.field]]
+      oid       = "FORTINET-FORTIGATE-MIB::fgProcessorPktRxCount"
+      name      = "pkt_rx"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid       = "FORTINET-FORTIGATE-MIB::fgProcessorPktTxCount"
+      name      = "pkt_tx"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid       = "FORTINET-FORTIGATE-MIB::fgProcessorPktDroppedCount"
+      name      = "pkt_dropped"
+      data_type = "counter64"
+
+    [[inputs.snmp.table.field]]
+      oid       = "FORTINET-FORTIGATE-MIB::fgProcessorPktTxDroppedCount"
+      name      = "pkt_tx_dropped"
+      data_type = "counter64"
+
+  [[inputs.snmp.table]]
+    name         = "fortinet_hw_sensors"
+    inherit_tags = ["hostname"]
+    oid          = "FORTINET-FORTIGATE-MIB::fgHwSensorTable"
+    index_as_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid    = "FORTINET-FORTIGATE-MIB::fgHwSensorEntName"
+      name   = "sensor"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgHwSensorEntValue"
+      name = "value"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgHwSensorEntAlarmStatus"
+      name = "alarm_status"
+
+  [[inputs.snmp.table]]
+    name         = "fortinet_ha_members"
+    inherit_tags = ["hostname"]
+    oid          = "FORTINET-FORTIGATE-MIB::fgHaStatsTable"
+    index_as_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid    = "FORTINET-FORTIGATE-MIB::fgHaStatsSerial"
+      name   = "serial_number"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid    = "FORTINET-FORTIGATE-MIB::fgHaStatsHostname"
+      name   = "member_hostname"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgHaStatsCpuUsage"
+      name = "cpu_pct"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgHaStatsMemUsage"
+      name = "mem_pct"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgHaStatsSesCount"
+      name = "sessions_active"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgHaStatsSyncStatus"
+      name = "sync_status"
+
+{{- end }}
+{{- end }}

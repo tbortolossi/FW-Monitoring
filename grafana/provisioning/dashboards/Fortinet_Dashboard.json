@@ -1,0 +1,963 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "suffix: days",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1001,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and r._field == \"uptime\")\n  |> group()\n  |> last()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Uptime\", _value: float(v: r._value) / 8640000.0 }))",
+          "refId": "A"
+        }
+      ],
+      "title": "Uptime",
+      "type": "stat"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 7,
+        "x": 4,
+        "y": 0
+      },
+      "id": 1002,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px 10px;overflow:hidden;\"><div style=\"font-size:clamp(20px,1.85vw,38px);line-height:1.08;font-weight:600;white-space:normal;word-break:normal;overflow-wrap:anywhere;\">${info_version:text}</div></div>"
+      },
+      "title": "Version",
+      "type": "text"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 11,
+        "y": 0
+      },
+      "id": 1003,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px 10px;overflow:hidden;\"><div style=\"font-size:clamp(20px,1.85vw,38px);line-height:1.08;font-weight:600;white-space:normal;word-break:normal;overflow-wrap:anywhere;\">${info_platform:text}</div></div>"
+      },
+      "title": "Platform",
+      "type": "text"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 7,
+        "x": 17,
+        "y": 0
+      },
+      "id": 1004,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px 10px;overflow:hidden;\"><div style=\"font-size:clamp(20px,1.85vw,38px);line-height:1.08;font-weight:600;white-space:normal;word-break:normal;overflow-wrap:anywhere;\">${info_ha:text}</div></div>"
+      },
+      "title": "HA Status",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"CPU\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_processors\" and r.hostname == \"${hostname}\" and (r._field == \"cpu_pct_1min\" or r._field == \"cpu_pct_5sec\"))\n  |> map(fn: (r) => ({ r with _field: \"CPU \" + r.index }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Per Processor",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and r._field == \"mem_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Memory\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 12
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and (r._field == \"sessions_active\" or r._field == \"npu_sessions_active\" or r._field == \"ipv6_sessions_active\"))\n  |> map(fn: (r) => ({ r with _field: if r._field == \"sessions_active\" then \"Sessions\" else if r._field == \"npu_sessions_active\" then \"NPU Sessions\" else \"IPv6 Sessions\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "Sessions / NPU Sessions",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and (r._field == \"cps_1min_avg\" or r._field == \"cps_10min_avg\" or r._field == \"cps_30min_avg\" or r._field == \"cps_60min_avg\" or r._field == \"npu_cps_1min_avg\"))\n  |> map(fn: (r) => ({ r with _field: if r._field == \"cps_1min_avg\" then \"CPS 1m\" else if r._field == \"cps_10min_avg\" then \"CPS 10m\" else if r._field == \"cps_30min_avg\" then \"CPS 30m\" else if r._field == \"cps_60min_avg\" then \"CPS 60m\" else \"NPU CPS 1m\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "CPS",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and r.ifName !~ /(?i)(mgmt|ha|hsci)/ and r._field =~ /^ifHC(In|Out)Octets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: if r._field == \"ifHCInOctets\" then \"In\" else \"Out\" }))\n  |> group(columns: [\"_time\", \"_field\"])\n  |> sum()\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "Throughput Global Interfaces",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "id": 9001,
+      "panels": [],
+      "title": "Interfaces",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and r.ifName == \"${interface}\" and r._field =~ /^ifHC(In|Out)Octets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: if r._field == \"ifHCInOctets\" then \"In\" else \"Out\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "Throughput ${interface}",
+      "type": "timeseries",
+      "description": "Repeated automatically for every non-management interface on the selected firewall.",
+      "repeat": "interface",
+      "repeatDirection": "h",
+      "maxPerRow": 2
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "id": 9004,
+      "panels": [],
+      "title": "Interface Errors / Discards",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 37
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and r.ifName == \"${interface}\" and r._field =~ /^if(In|Out)(Errors|Discards)$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"ifInErrors\" then \"In Errors\" else if r._field == \"ifOutErrors\" then \"Out Errors\" else if r._field == \"ifInDiscards\" then \"In Discards\" else \"Out Discards\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "Errors / Discards ${interface}",
+      "type": "timeseries",
+      "description": "Repeated automatically for every non-management interface on the selected firewall.",
+      "repeat": "interface",
+      "repeatDirection": "h",
+      "maxPerRow": 2
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "id": 9002,
+      "panels": [],
+      "title": "Contexts",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 46
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_vdoms\" and r.hostname == \"${hostname}\" and (r._field == \"cpu_pct\" or r._field == \"mem_pct\"))\n  |> map(fn: (r) => ({ r with _field: r.vdom + \" \" + r._field }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "VDOM CPU / Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 46
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_vdoms\" and r.hostname == \"${hostname}\" and (r._field == \"sessions_active\" or r._field == \"cps\"))\n  |> map(fn: (r) => ({ r with _field: r.vdom + \" \" + (if r._field == \"sessions_active\" then \"sessions\" else \"CPS\") }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "VDOM Sessions / CPS",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 53
+      },
+      "id": 9003,
+      "panels": [],
+      "title": "Storage and Drops",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 54
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and (r._field == \"disk_used_mb\" or r._field == \"disk_capacity_mb\" or r._field == \"lowmem_used_kb\" or r._field == \"lowmem_capacity_kb\"))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "Disk / Low Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 54
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_processors\" and r.hostname == \"${hostname}\" and (r._field == \"pkt_dropped\" or r._field == \"pkt_tx_dropped\"))\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _field: \"CPU \" + r.index + \" \" + r._field }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "Processor Drops",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "fortinet",
+    "firewall",
+    "monitoring"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {
+          "type": "influxdb",
+          "uid": "P951FEA4DE68E13C5"
+        },
+        "definition": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"firewalls\", tag: \"hostname\", predicate: (r) => r.vendor == \"fortinet\", start: -7d)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Hostname",
+        "multi": false,
+        "name": "hostname",
+        "options": [],
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"firewalls\", tag: \"hostname\", predicate: (r) => r.vendor == \"fortinet\", start: -7d)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "influxdb",
+          "uid": "P951FEA4DE68E13C5"
+        },
+        "definition": "import \"regexp\"\n\nfrom(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and r._field == \"fortios_version\")\n  |> group()\n  |> last()\n  |> map(fn: (r) => ({ _value: regexp.replaceAllString(r: /.*v([0-9.]+),build([0-9]+).*/, v: string(v: r._value), t: \"FortiOS $1 build $2\") }))\n  |> keep(columns: [\"_value\"])",
+        "hide": 2,
+        "includeAll": false,
+        "label": "Version",
+        "multi": false,
+        "name": "info_version",
+        "options": [],
+        "query": "import \"regexp\"\n\nfrom(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and r._field == \"fortios_version\")\n  |> group()\n  |> last()\n  |> map(fn: (r) => ({ _value: regexp.replaceAllString(r: /.*v([0-9.]+),build([0-9]+).*/, v: string(v: r._value), t: \"FortiOS $1 build $2\") }))\n  |> keep(columns: [\"_value\"])",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": true,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "influxdb",
+          "uid": "P951FEA4DE68E13C5"
+        },
+        "definition": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and r._field == \"serial_number\")\n  |> group()\n  |> last()\n  |> map(fn: (r) => ({ _value: if exists r.model then r.model else \"Unknown\" }))\n  |> keep(columns: [\"_value\"])",
+        "hide": 2,
+        "includeAll": false,
+        "label": "Platform",
+        "multi": false,
+        "name": "info_platform",
+        "options": [],
+        "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and r._field == \"serial_number\")\n  |> group()\n  |> last()\n  |> map(fn: (r) => ({ _value: if exists r.model then r.model else \"Unknown\" }))\n  |> keep(columns: [\"_value\"])",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": true,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "influxdb",
+          "uid": "P951FEA4DE68E13C5"
+        },
+        "definition": "import \"array\"\n\nha = from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r.hostname == \"${hostname}\" and ((r._measurement == \"fortinet_system\" and r._field == \"ha_mode\") or (r._measurement == \"fortinet_vdoms\" and r._field == \"ha_state\")))\n  |> group(columns: [\"_field\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _value: if r._field == \"ha_mode\" then (if r._value == 1 then \"Standalone\" else if r._value == 2 then \"Active-Active\" else if r._value == 3 then \"Active-Passive\" else \"Unknown\") else (if r._value == 1 then \"Primary\" else if r._value == 2 then \"Secondary\" else if r._value == 3 then \"Standalone\" else \"Unknown\") }))\n  |> group()\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({ _time: r._time, _value: if (exists r.ha_mode and r.ha_mode == \"Standalone\") or (exists r.ha_state and r.ha_state == \"Standalone\") then \"Standalone\" else if exists r.ha_mode and exists r.ha_state then r.ha_mode + \" / \" + r.ha_state else \"Standalone\" }))\n  |> keep(columns: [\"_time\", \"_value\"])\n\nunion(tables: [array.from(rows: [{_time: time(v: \"1970-01-01T00:00:00Z\"), _value: \"Standalone\"}]), ha])\n  |> group()\n  |> last()\n  |> keep(columns: [\"_value\"])",
+        "hide": 2,
+        "includeAll": false,
+        "label": "Ha",
+        "multi": false,
+        "name": "info_ha",
+        "options": [],
+        "query": "import \"array\"\n\nha = from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r.hostname == \"${hostname}\" and ((r._measurement == \"fortinet_system\" and r._field == \"ha_mode\") or (r._measurement == \"fortinet_vdoms\" and r._field == \"ha_state\")))\n  |> group(columns: [\"_field\"])\n  |> last()\n  |> map(fn: (r) => ({ r with _value: if r._field == \"ha_mode\" then (if r._value == 1 then \"Standalone\" else if r._value == 2 then \"Active-Active\" else if r._value == 3 then \"Active-Passive\" else \"Unknown\") else (if r._value == 1 then \"Primary\" else if r._value == 2 then \"Secondary\" else if r._value == 3 then \"Standalone\" else \"Unknown\") }))\n  |> group()\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({ _time: r._time, _value: if (exists r.ha_mode and r.ha_mode == \"Standalone\") or (exists r.ha_state and r.ha_state == \"Standalone\") then \"Standalone\" else if exists r.ha_mode and exists r.ha_state then r.ha_mode + \" / \" + r.ha_state else \"Standalone\" }))\n  |> keep(columns: [\"_time\", \"_value\"])\n\nunion(tables: [array.from(rows: [{_time: time(v: \"1970-01-01T00:00:00Z\"), _value: \"Standalone\"}]), ha])\n  |> group()\n  |> last()\n  |> keep(columns: [\"_value\"])",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": true,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "influxdb",
+          "uid": "P951FEA4DE68E13C5"
+        },
+        "definition": "from(bucket: \"firewalls\")\n  |> range(start: -7d)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)(mgmt|ha|hsci)/)\n  |> keep(columns: [\"ifName\"])\n  |> distinct(column: \"ifName\")\n  |> map(fn: (r) => ({ _value: r.ifName }))\n  |> sort(columns: [\"_value\"])",
+        "hide": 2,
+        "includeAll": true,
+        "label": "Interface",
+        "multi": true,
+        "name": "interface",
+        "options": [],
+        "query": "from(bucket: \"firewalls\")\n  |> range(start: -7d)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)(mgmt|ha|hsci)/)\n  |> keep(columns: [\"ifName\"])\n  |> distinct(column: \"ifName\")\n  |> map(fn: (r) => ({ _value: r.ifName }))\n  |> sort(columns: [\"_value\"])",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": true,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Fortinet Firewall Monitoring",
+  "uid": "fortinet-firewall-monitoring",
+  "version": 14,
+  "weekStart": ""
+}

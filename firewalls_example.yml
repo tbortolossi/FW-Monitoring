@@ -1,0 +1,48 @@
+# Firewall inventory.
+#
+# Copy this file to firewalls.yml, edit the copy, then run:
+#   ./generate.sh
+#
+# Keep this file simple: hostname, management IP, vendor, SNMP version,
+# and SNMP credentials. generate.sh discovers versions, models, chassis
+# status, VSYS/VDOM availability, and optional feature flags over SNMP.
+
+#####################################################
+## SNMPv3 examples
+#####################################################
+
+- hostname: PA-440
+  host: 192.0.2.101
+  vendor: paloalto
+  snmp_version: 3
+  username: snmpv3_user
+  auth_protocol: sha256
+  auth_password: CHANGE_ME_AUTH
+  priv_protocol: aes256
+  priv_password: CHANGE_ME_PRIV
+
+- hostname: FGT-80F
+  host: 192.0.2.102
+  vendor: fortinet
+  snmp_version: 3
+  username: snmpv3_user
+  auth_protocol: sha256
+  auth_password: CHANGE_ME_AUTH
+  priv_protocol: aes256
+  priv_password: CHANGE_ME_PRIV
+
+#####################################################
+## SNMPv2c examples
+#####################################################
+
+#- hostname: PA-440
+#  host: 192.0.2.101
+#  vendor: paloalto
+#  snmp_version: 2
+#  community: CHANGE_ME
+#
+#- hostname: FGT-80F
+#  host: 192.0.2.102
+#  vendor: fortinet
+#  snmp_version: 2
+#  community: CHANGE_ME

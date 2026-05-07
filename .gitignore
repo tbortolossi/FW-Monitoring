@@ -1,0 +1,56 @@
+# Runtime data
+grafana-data/
+influxdb-data/
+influxdb-data.backup-*/
+
+# Generated local configuration
+telegraf/telegraf.conf
+.firewalls.generated.yml
+
+# Local firewall inventories may contain real IPs and SNMP credentials.
+firewalls.yml
+firewalls_*.yml
+firewalls_*.yaml
+!firewalls_example.yml
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+secrets/
+*.secret
+*.key
+*.pem
+*.crt
+
+# Logs and temporary files
+logs/
+.tmp/
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+*.zip
+/*Dashboard_*.json
+
+# Downloaded Palo Alto MIB files are fetched by the generator.
+telegraf/mibs/paloalto/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Local Python/cache noise from helper tools
+.venv/
+wheelhouse/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Docker Compose override files for local experiments
+docker-compose.override.yaml
+docker-compose.override.yml

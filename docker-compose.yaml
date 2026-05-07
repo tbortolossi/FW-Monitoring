@@ -1,0 +1,50 @@
+services:
+  influxdb:
+    image: influxdb:2.7
+    restart: unless-stopped
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "10"
+    ports: ["8086:8086"]
+    volumes:
+      - ./influxdb-data:/var/lib/influxdb2
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_ADMIN_USER:?Set INFLUX_ADMIN_USER in .env}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_ADMIN_PASSWORD:?Set INFLUX_ADMIN_PASSWORD in .env}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG:-netops}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET:-firewalls}
+      DOCKER_INFLUXDB_INIT_RETENTION: ${INFLUX_RETENTION:-30d}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:?Set INFLUX_TOKEN in .env}
+
+  telegraf:
+    build: ./telegraf
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on: [influxdb]
+    environment:
+      INFLUX_TOKEN: ${INFLUX_TOKEN:?Set INFLUX_TOKEN in .env}
+      INFLUX_ORG: ${INFLUX_ORG:-netops}
+      INFLUX_BUCKET: ${INFLUX_BUCKET:-firewalls}
+    volumes:
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - ./telegraf/mibs/paloalto:/usr/share/snmp/mibs/vendors/paloalto:ro
+      - ./logs/telegraf:/var/log/telegraf
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    restart: unless-stopped
+    logging: *default-logging
+    ports: ["3000:3000"]
+    depends_on: [influxdb]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      INFLUX_TOKEN: ${INFLUX_TOKEN:?Set INFLUX_TOKEN in .env}
+      INFLUX_ORG: ${INFLUX_ORG:-netops}
+      INFLUX_BUCKET: ${INFLUX_BUCKET:-firewalls}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana-data:/var/lib/grafana
