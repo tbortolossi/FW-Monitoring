@@ -416,3 +416,7 @@ These files/directories are generated locally and ignored by Git:
 ## Scope
 
 This project is a quick firewall monitoring starter. It is not intended to replace a full NMS, SIEM, or vendor management platform.
+
+## License
+
+MIT License. See `LICENSE`.
