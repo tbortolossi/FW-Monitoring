@@ -1,5 +1,7 @@
 # Firewall Monitoring Starter
 
+SNMP-only Palo Alto and Fortinet firewall monitoring stack with Docker Compose, Telegraf, InfluxDB, and Grafana.
+
 Docker Compose stack for quick Palo Alto and Fortinet firewall monitoring with Telegraf, InfluxDB, and Grafana.
 
 The goal is simple operational visibility: CPU, memory, sessions, CPS, disk where useful, interface status, errors/discards, and throughput. It is useful when you need a quick factual view of firewall load without deploying a full NMS.
