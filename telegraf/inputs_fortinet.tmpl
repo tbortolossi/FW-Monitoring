@@ -149,6 +149,16 @@
       is_tag = true
 
     [[inputs.snmp.table.field]]
+      oid    = "IF-MIB::ifType"
+      name   = "ifType"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid    = "IF-MIB::ifConnectorPresent"
+      name   = "ifConnectorPresent"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
       oid       = "IF-MIB::ifHCInOctets"
       name      = "ifHCInOctets"
       data_type = "counter64"
