@@ -1917,6 +1917,22 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "pool"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Pool"
+              },
+              {
+                "id": "custom.width",
+                "value": 420
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "storage_type"
             },
             "properties": [
@@ -1926,23 +1942,7 @@
               },
               {
                 "id": "custom.width",
-                "value": 190
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "storage_descr"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "SNMP description"
-              },
-              {
-                "id": "custom.width",
-                "value": 360
+                "value": 170
               }
             ]
           },
@@ -1955,6 +1955,10 @@
               {
                 "id": "displayName",
                 "value": "Used %"
+              },
+              {
+                "id": "custom.width",
+                "value": 160
               },
               {
                 "id": "unit",
@@ -1982,7 +1986,11 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Used bytes"
+                "value": "Used"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
               },
               {
                 "id": "unit",
@@ -2002,7 +2010,11 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Size bytes"
+                "value": "Size"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
               },
               {
                 "id": "unit",
@@ -2011,70 +2023,6 @@
               {
                 "id": "decimals",
                 "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "storage_used"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Used units"
-              },
-              {
-                "id": "unit",
-                "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "storage_size"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Size units"
-              },
-              {
-                "id": "unit",
-                "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "allocation_units"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Bytes per unit"
-              },
-              {
-                "id": "unit",
-                "value": "bytes"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "storage_index"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Index"
-              },
-              {
-                "id": "custom.width",
-                "value": 80
               }
             ]
           }
@@ -2106,13 +2054,13 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\")\n  |> filter(fn: (r) => r._field == \"storage_usage_pct\" or r._field == \"storage_size\" or r._field == \"storage_used\" or r._field == \"allocation_units\")\n  |> last()\n  |> pivot(rowKey: [\"storage_index\", \"storage_descr\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({ r with\n    storage_type: if r.storage_descr =~ /(?i)(packet descriptors|on-chip|descriptor)/ then \"Dataplane descriptors\" else if r.storage_descr =~ /(?i)(hardware packet buffers|packet buffers|packet buffer)/ then \"Dataplane packet buffers\" else if r.storage_descr =~ /(?i)(management memory|memory)/ then \"Management memory\" else if r.storage_descr =~ /(?i)(disk|filesystem|tmp|var|opt|root|boot|log)/ then \"Filesystem / disk\" else \"Other hrStorage pool\",\n    used_pct: if exists r.storage_usage_pct then float(v: r.storage_usage_pct) else if exists r.storage_used and exists r.storage_size and r.storage_size > 0 then float(v: r.storage_used) / float(v: r.storage_size) * 100.0 else 0.0,\n    size_bytes: if exists r.storage_size and exists r.allocation_units then float(v: r.storage_size) * float(v: r.allocation_units) else 0.0,\n    used_bytes: if exists r.storage_used and exists r.allocation_units then float(v: r.storage_used) * float(v: r.allocation_units) else 0.0\n  }))\n  |> keep(columns: [\"storage_type\", \"storage_descr\", \"used_pct\", \"used_bytes\", \"size_bytes\", \"storage_used\", \"storage_size\", \"allocation_units\", \"storage_index\"])\n  |> sort(columns: [\"storage_type\", \"storage_descr\"])",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\")\n  |> filter(fn: (r) => r._field == \"storage_usage_pct\" or r._field == \"storage_size\" or r._field == \"storage_used\" or r._field == \"allocation_units\")\n  |> last()\n  |> pivot(rowKey: [\"storage_index\", \"storage_descr\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({ r with\n    pool: r.storage_descr + \" [hrStorage \" + string(v: r.storage_index) + \"]\",\n    storage_type: if r.storage_descr =~ /(?i)(packet descriptors|on-chip|descriptor)/ then \"Packet descriptors\" else if r.storage_descr =~ /(?i)(hardware packet buffers|packet buffers|packet buffer)/ then \"Packet buffers\" else if r.storage_descr =~ /(?i)(management memory|memory)/ then \"Management memory\" else if r.storage_descr =~ /(?i)(disk|filesystem|tmp|var|opt|root|boot|log)/ then \"Filesystem / disk\" else \"Other hrStorage pool\",\n    used_pct: if exists r.storage_usage_pct then float(v: r.storage_usage_pct) else if exists r.storage_used and exists r.storage_size and r.storage_size > 0 then float(v: r.storage_used) / float(v: r.storage_size) * 100.0 else 0.0,\n    size_bytes: if exists r.storage_size and exists r.allocation_units then float(v: r.storage_size) * float(v: r.allocation_units) else 0.0,\n    used_bytes: if exists r.storage_used and exists r.allocation_units then float(v: r.storage_used) * float(v: r.allocation_units) else 0.0\n  }))\n  |> keep(columns: [\"pool\", \"storage_type\", \"used_pct\", \"used_bytes\", \"size_bytes\"])\n  |> sort(columns: [\"storage_type\", \"pool\"])",
           "refId": "A"
         }
       ],
-      "title": "Storage Pool Details",
+      "title": "Storage Pools (hrStorage)",
       "type": "table",
-      "description": "Raw HOST-RESOURCES-MIB hrStorageTable entries exposed by PAN-OS. This is not only disk: Palo Alto also reports management memory, dataplane packet buffers, and descriptor pools here. Used/Size are shown both as bytes when allocation_units is meaningful and as raw hrStorage units for troubleshooting."
+      "description": "One row per HOST-RESOURCES-MIB hrStorageTable pool. Palo Alto exposes packet buffers, descriptors, management memory, and filesystems through this same table. Repeated packet-buffer rows are distinct SNMP pools, usually different DP/slot/index entries; the hrStorage index is included in Pool to make that visible."
     }
   ],
   "refresh": "30s",
