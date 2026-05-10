@@ -54,3 +54,6 @@ __pycache__/
 # Docker Compose override files for local experiments
 docker-compose.override.yaml
 docker-compose.override.yml
+
+# MIBs downloaded
+mibs/
