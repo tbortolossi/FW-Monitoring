@@ -148,9 +148,8 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "right",
-          "showLegend": true,
-          "width": 300
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
           "mode": "multi",
@@ -261,9 +260,8 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "right",
-          "showLegend": true,
-          "width": 220
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
           "mode": "multi",
@@ -317,9 +315,8 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "right",
-          "showLegend": true,
-          "width": 220
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
           "mode": "multi",
@@ -428,9 +425,8 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "right",
-          "showLegend": true,
-          "width": 360
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
           "mode": "multi",
@@ -494,9 +490,8 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "right",
-              "showLegend": true,
-              "width": 300
+              "placement": "bottom",
+              "showLegend": true
             },
             "tooltip": {
               "mode": "multi",
@@ -568,9 +563,8 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "right",
-              "showLegend": true,
-              "width": 300
+              "placement": "bottom",
+              "showLegend": true
             },
             "tooltip": {
               "mode": "multi",
@@ -642,9 +636,8 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "right",
-              "showLegend": true,
-              "width": 300
+              "placement": "bottom",
+              "showLegend": true
             },
             "tooltip": {
               "mode": "multi",
@@ -685,9 +678,9 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 46
+            "w": 24,
+            "x": 0,
+            "y": 54
           },
           "id": 10,
           "options": {
@@ -700,7 +693,7 @@
               "displayMode": "table",
               "placement": "right",
               "showLegend": true,
-              "width": 300
+              "width": 360
             },
             "tooltip": {
               "mode": "multi",
@@ -743,7 +736,7 @@
             "h": 12,
             "w": 24,
             "x": 0,
-            "y": 54
+            "y": 62
           },
           "id": 13,
           "options": {
@@ -814,7 +807,7 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 8,
+            "w": 12,
             "x": 0,
             "y": 54
           },
@@ -827,9 +820,8 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "right",
-              "showLegend": true,
-              "width": 220
+              "placement": "bottom",
+              "showLegend": true
             },
             "tooltip": {
               "mode": "multi",
@@ -869,10 +861,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 10,
+            "h": 8,
             "w": 24,
             "x": 0,
-            "y": 62
+            "y": 71
           },
           "id": 12,
           "options": {
@@ -883,9 +875,8 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "right",
-              "showLegend": true,
-              "width": 360
+              "placement": "bottom",
+              "showLegend": true
             },
             "tooltip": {
               "mode": "multi",
@@ -925,10 +916,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 54
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 62
           },
           "id": 14,
           "options": {
@@ -941,7 +932,7 @@
               "displayMode": "table",
               "placement": "right",
               "showLegend": true,
-              "width": 220
+              "width": 360
             },
             "tooltip": {
               "mode": "multi",
@@ -982,8 +973,8 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 8,
-            "x": 16,
+            "w": 12,
+            "x": 12,
             "y": 54
           },
           "id": 15,
@@ -995,9 +986,8 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "right",
-              "showLegend": true,
-              "width": 220
+              "placement": "bottom",
+              "showLegend": true
             },
             "tooltip": {
               "mode": "multi",
@@ -1038,9 +1028,9 @@
           },
           "gridPos": {
             "h": 11,
-            "w": 12,
+            "w": 24,
             "x": 0,
-            "y": 72
+            "y": 79
           },
           "id": 16,
           "options": {
@@ -1053,7 +1043,7 @@
               "displayMode": "table",
               "placement": "right",
               "showLegend": true,
-              "width": 300
+              "width": 360
             },
             "tooltip": {
               "mode": "multi",
@@ -1094,9 +1084,9 @@
           },
           "gridPos": {
             "h": 14,
-            "w": 12,
-            "x": 12,
-            "y": 72
+            "w": 24,
+            "x": 0,
+            "y": 90
           },
           "id": 17,
           "options": {
@@ -1109,7 +1099,7 @@
               "displayMode": "table",
               "placement": "right",
               "showLegend": true,
-              "width": 300
+              "width": 360
             },
             "tooltip": {
               "mode": "multi",
@@ -1150,9 +1140,9 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 12,
+            "w": 24,
             "x": 0,
-            "y": 83
+            "y": 104
           },
           "id": 18,
           "options": {
@@ -1163,9 +1153,8 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "right",
-              "showLegend": true,
-              "width": 300
+              "placement": "bottom",
+              "showLegend": true
             },
             "tooltip": {
               "mode": "multi",
@@ -1206,9 +1195,9 @@
           },
           "gridPos": {
             "h": 12,
-            "w": 12,
-            "x": 12,
-            "y": 86
+            "w": 24,
+            "x": 0,
+            "y": 112
           },
           "id": 19,
           "options": {
@@ -1221,7 +1210,7 @@
               "displayMode": "table",
               "placement": "right",
               "showLegend": true,
-              "width": 300
+              "width": 360
             },
             "tooltip": {
               "mode": "multi",
@@ -1289,9 +1278,8 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "right",
-              "showLegend": true,
-              "width": 300
+              "placement": "bottom",
+              "showLegend": true
             },
             "tooltip": {
               "mode": "single",
