@@ -549,8 +549,8 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 7,
-            "w": 12,
+            "h": 10,
+            "w": 24,
             "x": 0,
             "y": 33
           },
@@ -563,8 +563,9 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
+              "placement": "right",
+              "showLegend": true,
+              "width": 420
             },
             "tooltip": {
               "mode": "multi",
@@ -586,14 +587,14 @@
           "description": "Repeated automatically for every non-management interface on the selected firewall.",
           "repeat": "interface",
           "repeatDirection": "h",
-          "maxPerRow": 2
+          "maxPerRow": 1
         }
       ],
       "title": "Interface Errors / Discards",
       "type": "row"
     },
     {
-      "collapsed": false,
+      "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -619,11 +620,60 @@
                 "showPoints": "never"
               }
             },
-            "overrides": []
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "sessions"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Sessions"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "left"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "utilization"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Utilization %"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  }
+                ]
+              }
+            ]
           },
           "gridPos": {
             "h": 8,
-            "w": 12,
+            "w": 24,
             "x": 0,
             "y": 34
           },
@@ -650,7 +700,7 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "import \"regexp\"\n\nselectedVsysId = regexp.findString(r: /[0-9]+/, v: \"${vsys}\")\n\nfrom(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and r.vsys_id == selectedVsysId and (r._field == \"active_sessions\" or r._field == \"session_utilization_pct\"))\n  |> map(fn: (r) => ({ r with _field: if r._field == \"active_sessions\" then \"sessions\" else \"utilization\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and r.vsys_id == \"${vsys}\" and (r._field == \"active_sessions\" or r._field == \"session_utilization_pct\"))\n  |> map(fn: (r) => ({ r with _field: if r._field == \"active_sessions\" then \"sessions\" else \"utilization\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
@@ -706,7 +756,7 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "import \"regexp\"\n\nselectedVsysId = regexp.findString(r: /[0-9]+/, v: \"${vsys}\")\n\nfrom(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and r.vsys_id == selectedVsysId and (r._field == \"tcp_cps\" or r._field == \"udp_cps\" or r._field == \"other_ip_cps\" or r._field == \"total_cps\"))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and r.vsys_id == \"${vsys}\" and (r._field == \"tcp_cps\" or r._field == \"udp_cps\" or r._field == \"other_ip_cps\" or r._field == \"total_cps\"))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
@@ -762,7 +812,7 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "import \"regexp\"\n\nselectedVsysId = regexp.findString(r: /[0-9]+/, v: \"${vsys}\")\n\nfrom(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_zones\" and r.hostname == \"${hostname}\" and exists r.index and exists r.zone and (r._field == \"tcp_cps\" or r._field == \"udp_cps\" or r._field == \"other_ip_cps\"))\n  |> map(fn: (r) => ({ r with zone_vsys_id: regexp.findString(r: /[0-9]+$/, v: r.index) }))\n  |> filter(fn: (r) => r.zone_vsys_id == selectedVsysId)\n  |> map(fn: (r) => ({ r with _field: r.zone + \" \" + r._field }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "import \"regexp\"\n\nfrom(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_zones\" and r.hostname == \"${hostname}\" and exists r.index and exists r.zone and (r._field == \"tcp_cps\" or r._field == \"udp_cps\" or r._field == \"other_ip_cps\"))\n  |> map(fn: (r) => ({ r with zone_vsys_id: regexp.findString(r: /[0-9]+$/, v: r.index) }))\n  |> filter(fn: (r) => r.zone_vsys_id == \"${vsys}\")\n  |> map(fn: (r) => ({ r with _field: r.zone + \" \" + r._field }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
@@ -771,7 +821,7 @@
           "description": "Zone CPS for the current VSYS. The row label includes VSYS id and name when available."
         }
       ],
-      "title": "Context - ${vsys}",
+      "title": "VSYS ${vsys}",
       "type": "row",
       "repeat": "vsys",
       "repeatDirection": "v"
@@ -806,175 +856,9 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 63
-          },
-          "id": 11,
-          "options": {
-            "legend": {
-              "calcs": [
-                "lastNotNull",
-                "mean",
-                "max"
-              ],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "influxdb",
-                "uid": "P951FEA4DE68E13C5"
-              },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and (r._field == \"storage_usage_pct\" or r._field == \"storage_used\"))\n  |> map(fn: (r) => ({ r with _field: r.storage_descr + \" \" + r._field }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
-              "refId": "A"
-            }
-          ],
-          "title": "Storage Usage",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "P951FEA4DE68E13C5"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "ops",
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "fillOpacity": 8,
-                "spanNulls": false,
-                "showPoints": "never"
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
+            "h": 10,
             "w": 24,
             "x": 0,
-            "y": 80
-          },
-          "id": 12,
-          "options": {
-            "legend": {
-              "calcs": [
-                "lastNotNull",
-                "mean",
-                "max"
-              ],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "influxdb",
-                "uid": "P951FEA4DE68E13C5"
-              },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_global_counters\" and r.hostname == \"${hostname}\")\n  |> filter(fn: (r) => r._field !~ /^panFlowDos/ and r._field != \"panFlowPolicyDeny\" and r._field != \"panFlowPolicyNat\" and r._field != \"panFlowScanDrop\" and r._field != \"panFlowMeterVsysThrottle\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
-              "refId": "A"
-            }
-          ],
-          "title": "Global Counters Drops",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "P951FEA4DE68E13C5"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "ops",
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "fillOpacity": 8,
-                "spanNulls": false,
-                "showPoints": "never"
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 9,
-            "w": 24,
-            "x": 0,
-            "y": 71
-          },
-          "id": 14,
-          "options": {
-            "legend": {
-              "calcs": [
-                "lastNotNull",
-                "mean",
-                "max"
-              ],
-              "displayMode": "table",
-              "placement": "right",
-              "showLegend": true,
-              "width": 360
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "influxdb",
-                "uid": "P951FEA4DE68E13C5"
-              },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_global_counters\" and r.hostname == \"${hostname}\" and (r._field == \"panFlowPolicyDeny\" or r._field == \"panFlowDosDropIpBlocked\" or r._field == \"panFlowDosRuleDrop\" or r._field == \"panFlowDosPbpDrop\"))\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"panFlowPolicyDeny\" then \"policy deny\" else if r._field == \"panFlowDosDropIpBlocked\" then \"blocked drops\" else if r._field == \"panFlowDosRuleDrop\" then \"DoS rule drops\" else \"PBP RED drops\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
-              "refId": "A"
-            }
-          ],
-          "title": "Slowpath / DoS Drop Rate",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "P951FEA4DE68E13C5"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "fillOpacity": 8,
-                "spanNulls": false,
-                "showPoints": "never"
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
             "y": 63
           },
           "id": 15,
@@ -986,8 +870,9 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
+              "placement": "right",
+              "showLegend": true,
+              "width": 420
             },
             "tooltip": {
               "mode": "multi",
@@ -1027,12 +912,12 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 11,
+            "h": 10,
             "w": 24,
             "x": 0,
-            "y": 88
+            "y": 73
           },
-          "id": 16,
+          "id": 14,
           "options": {
             "legend": {
               "calcs": [
@@ -1043,7 +928,7 @@
               "displayMode": "table",
               "placement": "right",
               "showLegend": true,
-              "width": 360
+              "width": 420
             },
             "tooltip": {
               "mode": "multi",
@@ -1056,11 +941,11 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_global_counters\" and r.hostname == \"${hostname}\" and (r._field == \"panFlowDosRedIcmp\" or r._field == \"panFlowDosRedIcmp6\" or r._field == \"panFlowDosRedIp\" or r._field == \"panFlowDosRedTcp\" or r._field == \"panFlowDosRedUdp\" or r._field == \"panFlowDosZoneRedAct\" or r._field == \"panFlowDosZoneRedMax\" or r._field == \"panFlowDosPbpDrop\"))\n  |> derivative(unit: 1s, nonNegative: true)\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_global_counters\" and r.hostname == \"${hostname}\" and (r._field == \"panFlowPolicyDeny\" or r._field == \"panFlowDosDropIpBlocked\" or r._field == \"panFlowDosRuleDrop\" or r._field == \"panFlowDosPbpDrop\"))\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"panFlowPolicyDeny\" then \"policy deny\" else if r._field == \"panFlowDosDropIpBlocked\" then \"blocked drops\" else if r._field == \"panFlowDosRuleDrop\" then \"DoS rule drops\" else \"PBP RED drops\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
               "refId": "A"
             }
           ],
-          "title": "Zone Protection RED Drops",
+          "title": "Slowpath / DoS Drop Rate",
           "type": "timeseries"
         },
         {
@@ -1086,7 +971,133 @@
             "h": 14,
             "w": 24,
             "x": 0,
-            "y": 99
+            "y": 83
+          },
+          "id": 16,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "width": 420
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_global_counters\" and r.hostname == \"${hostname}\" and (r._field == \"panFlowDosRedIcmp\" or r._field == \"panFlowDosRedIcmp6\" or r._field == \"panFlowDosRedIp\" or r._field == \"panFlowDosRedTcp\" or r._field == \"panFlowDosRedUdp\" or r._field == \"panFlowDosZoneRedAct\" or r._field == \"panFlowDosZoneRedMax\" or r._field == \"panFlowDosPbpDrop\"))\n  |> derivative(unit: 1s, nonNegative: true)\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Zone Protection RED Drops",
+          "type": "timeseries"
+        }
+      ],
+      "title": "Data Plane Pressure and Key Drops",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 63
+      },
+      "id": 9020,
+      "panels": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 18,
+            "w": 24,
+            "x": 0,
+            "y": 64
+          },
+          "id": 12,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "width": 420
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_global_counters\" and r.hostname == \"${hostname}\")\n  |> filter(fn: (r) => r._field !~ /^panFlowDos/ and r._field != \"panFlowPolicyDeny\" and r._field != \"panFlowPolicyNat\" and r._field != \"panFlowScanDrop\" and r._field != \"panFlowMeterVsysThrottle\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Global Counters Drops",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 18,
+            "w": 24,
+            "x": 0,
+            "y": 82
           },
           "id": 17,
           "options": {
@@ -1099,7 +1110,7 @@
               "displayMode": "table",
               "placement": "right",
               "showLegend": true,
-              "width": 360
+              "width": 420
             },
             "tooltip": {
               "mode": "multi",
@@ -1139,10 +1150,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
+            "h": 16,
             "w": 24,
             "x": 0,
-            "y": 113
+            "y": 100
           },
           "id": 18,
           "options": {
@@ -1153,8 +1164,9 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
+              "placement": "right",
+              "showLegend": true,
+              "width": 420
             },
             "tooltip": {
               "mode": "multi",
@@ -1194,10 +1206,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 12,
+            "h": 14,
             "w": 24,
             "x": 0,
-            "y": 121
+            "y": 116
           },
           "id": 19,
           "options": {
@@ -1210,7 +1222,7 @@
               "displayMode": "table",
               "placement": "right",
               "showLegend": true,
-              "width": 360
+              "width": 420
             },
             "tooltip": {
               "mode": "multi",
@@ -1231,7 +1243,7 @@
           "type": "timeseries"
         }
       ],
-      "title": "Resource Pressure and Drops",
+      "title": "Advanced DoS / Drop Counters",
       "type": "row"
     },
     {
@@ -1240,11 +1252,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 64
       },
       "id": 9100,
       "panels": [],
-      "title": "Chassis and Blades",
+      "title": "Chassis, Blades, and Advanced Resources",
       "type": "row"
     },
     {
@@ -1278,7 +1290,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 64
+        "y": 65
       },
       "id": 9101,
       "options": {
@@ -1366,7 +1378,7 @@
         "h": 11,
         "w": 12,
         "x": 0,
-        "y": 73
+        "y": 74
       },
       "id": 9102,
       "options": {
@@ -1430,7 +1442,7 @@
         "h": 11,
         "w": 12,
         "x": 12,
-        "y": 73
+        "y": 74
       },
       "id": 9103,
       "options": {
@@ -1490,7 +1502,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 84
+        "y": 85
       },
       "id": 9104,
       "options": {
@@ -1579,7 +1591,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 84
+        "y": 85
       },
       "id": 9105,
       "options": {
@@ -1682,7 +1694,7 @@
         "h": 11,
         "w": 12,
         "x": 0,
-        "y": 93
+        "y": 94
       },
       "id": 9106,
       "options": {
@@ -1754,7 +1766,7 @@
         "h": 11,
         "w": 12,
         "x": 12,
-        "y": 93
+        "y": 94
       },
       "id": 9107,
       "options": {
@@ -1784,283 +1796,586 @@
       "type": "table"
     },
     {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "P951FEA4DE68E13C5"
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 105
       },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
+      "id": 9005,
+      "panels": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
           },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "%",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
             },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 105
+          },
+          "id": 11,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "width": 420
             },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
             }
           },
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
               },
-              {
-                "color": "orange",
-                "value": 75
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 12,
-        "x": 0,
-        "y": 104
-      },
-      "id": 9108,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "mean",
-            "max"
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and r._field == \"storage_usage_pct\")\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(management|memory|disk|filesystem|tmp|var|opt|root|boot|log)/ and r.storage_descr !~ /(?i)(data processor|hardware packet buffers|packet buffers|packet buffer|packet descriptors|on-chip|descriptor)/)\n  |> map(fn: (r) => ({ r with _field: r.storage_descr + \" [hrStorage \" + string(v: r.storage_index) + \"]\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+              "refId": "A"
+            }
           ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "title": "Management Plane Storage Usage",
+          "type": "timeseries",
+          "description": "Management-plane memory and filesystem hrStorage usage. Dataplane packet buffers are shown separately."
         },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "11.1.4",
-      "targets": [
         {
           "datasource": {
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and r._field == \"storage_usage_pct\")\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(data processor|hardware packet buffers|packet buffers|packet buffer|packet descriptors|on-chip|descriptor)/)\n  |> map(fn: (r) => ({ r with _field: r.storage_descr }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
-          "refId": "A"
-        }
-      ],
-      "title": "Memory and Packet Buffer Usage",
-      "type": "timeseries",
-      "description": "Dataplane packet buffer and descriptor pools from HOST-RESOURCES hrStorageTable. Management-plane memory is intentionally excluded here."
-    },
-    {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "P951FEA4DE68E13C5"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
             },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
+            "overrides": [
               {
-                "color": "green",
-                "value": null
+                "matcher": {
+                  "id": "byName",
+                  "options": "pool"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Pool"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 420
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "storage_type"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Type"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 170
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "used_pct"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Used %"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 160
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  },
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 1
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "basic",
+                      "valueDisplayMode": "text"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "orange",
+                          "value": 70
+                        },
+                        {
+                          "color": "red",
+                          "value": 90
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "used_bytes"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Used"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "size_bytes"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Size"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  }
+                ]
               }
             ]
           },
-          "unit": "short"
+          "gridPos": {
+            "h": 12,
+            "w": 24,
+            "x": 0,
+            "y": 115
+          },
+          "id": 9109,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": false
+            },
+            "showHeader": true
+          },
+          "pluginVersion": "11.1.4",
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\")\n  |> filter(fn: (r) => r._field == \"storage_usage_pct\" or r._field == \"storage_size\" or r._field == \"storage_used\" or r._field == \"allocation_units\")\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(management|memory|disk|filesystem|tmp|var|opt|root|boot|log)/ and r.storage_descr !~ /(?i)(data processor|hardware packet buffers|packet buffers|packet buffer|packet descriptors|on-chip|descriptor)/)\n  |> last()\n  |> group(columns: [\"storage_index\", \"storage_descr\"])\n  |> pivot(rowKey: [\"storage_index\", \"storage_descr\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({ r with\n    pool: r.storage_descr + \" [hrStorage \" + string(v: r.storage_index) + \"]\",\n    storage_type: if r.storage_descr =~ /(?i)(packet descriptors|on-chip|descriptor)/ then \"Packet descriptors\" else if r.storage_descr =~ /(?i)(hardware packet buffers|packet buffers|packet buffer)/ then \"Packet buffers\" else if r.storage_descr =~ /(?i)(management memory|memory)/ then \"Management memory\" else if r.storage_descr =~ /(?i)(disk|filesystem|tmp|var|opt|root|boot|log)/ then \"Filesystem / disk\" else \"Other hrStorage pool\",\n    used_pct: if exists r.storage_usage_pct then float(v: r.storage_usage_pct) else if exists r.storage_used and exists r.storage_size and r.storage_size > 0 then float(v: r.storage_used) / float(v: r.storage_size) * 100.0 else 0.0,\n    size_bytes: if exists r.storage_size and exists r.allocation_units then float(v: r.storage_size) * float(v: r.allocation_units) else 0.0,\n    used_bytes: if exists r.storage_used and exists r.allocation_units then float(v: r.storage_used) * float(v: r.allocation_units) else 0.0\n  }))\n  |> keep(columns: [\"pool\", \"storage_type\", \"used_pct\", \"used_bytes\", \"size_bytes\"])\n  |> sort(columns: [\"storage_type\", \"pool\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Management Plane Storage Pools (hrStorage)",
+          "type": "table",
+          "description": "Management-plane memory and filesystem pools from HOST-RESOURCES-MIB hrStorageTable."
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "pool"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Pool"
-              },
-              {
-                "id": "custom.width",
-                "value": 420
-              }
-            ]
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
           },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "storage_type"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Type"
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
               },
-              {
-                "id": "custom.width",
-                "value": 170
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "used_pct"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Used %"
-              },
-              {
-                "id": "custom.width",
-                "value": 160
-              },
-              {
-                "id": "unit",
-                "value": "percent"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "gauge",
-                  "mode": "lcd",
-                  "valueDisplayMode": "color"
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "%",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 4,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
                 }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "used_bytes"
+              },
+              "mappings": [],
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 75
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "unit": "percent"
             },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Used"
-              },
-              {
-                "id": "custom.width",
-                "value": 120
-              },
-              {
-                "id": "unit",
-                "value": "bytes"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
+            "overrides": []
           },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "size_bytes"
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 127
+          },
+          "id": 9108,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "width": 420
             },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Size"
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "11.1.4",
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
               },
-              {
-                "id": "custom.width",
-                "value": 120
-              },
-              {
-                "id": "unit",
-                "value": "bytes"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 12,
-        "x": 12,
-        "y": 104
-      },
-      "id": 9109,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and r._field == \"storage_usage_pct\")\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(data processor|hardware packet buffers|packet buffers|packet buffer|packet descriptors|on-chip|descriptor)/)\n  |> map(fn: (r) => ({ r with _field: r.storage_descr + \" [hrStorage \" + string(v: r.storage_index) + \"]\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
           ],
-          "show": false
+          "title": "Data Plane Buffer Usage",
+          "type": "timeseries",
+          "description": "Dataplane packet buffer, descriptor, and data-processor pool usage from HOST-RESOURCES hrStorageTable."
         },
-        "showHeader": true
-      },
-      "pluginVersion": "11.1.4",
-      "targets": [
         {
           "datasource": {
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\")\n  |> filter(fn: (r) => r._field == \"storage_usage_pct\" or r._field == \"storage_size\" or r._field == \"storage_used\" or r._field == \"allocation_units\")\n  |> last()\n  |> pivot(rowKey: [\"storage_index\", \"storage_descr\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({ r with\n    pool: r.storage_descr + \" [hrStorage \" + string(v: r.storage_index) + \"]\",\n    storage_type: if r.storage_descr =~ /(?i)(packet descriptors|on-chip|descriptor)/ then \"Packet descriptors\" else if r.storage_descr =~ /(?i)(hardware packet buffers|packet buffers|packet buffer)/ then \"Packet buffers\" else if r.storage_descr =~ /(?i)(management memory|memory)/ then \"Management memory\" else if r.storage_descr =~ /(?i)(disk|filesystem|tmp|var|opt|root|boot|log)/ then \"Filesystem / disk\" else \"Other hrStorage pool\",\n    used_pct: if exists r.storage_usage_pct then float(v: r.storage_usage_pct) else if exists r.storage_used and exists r.storage_size and r.storage_size > 0 then float(v: r.storage_used) / float(v: r.storage_size) * 100.0 else 0.0,\n    size_bytes: if exists r.storage_size and exists r.allocation_units then float(v: r.storage_size) * float(v: r.allocation_units) else 0.0,\n    used_bytes: if exists r.storage_used and exists r.allocation_units then float(v: r.storage_used) * float(v: r.allocation_units) else 0.0\n  }))\n  |> keep(columns: [\"pool\", \"storage_type\", \"used_pct\", \"used_bytes\", \"size_bytes\"])\n  |> sort(columns: [\"storage_type\", \"pool\"])",
-          "refId": "A"
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "pool"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Pool"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 420
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "storage_type"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Type"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 170
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "used_pct"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Used %"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 160
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  },
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 1
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "basic",
+                      "valueDisplayMode": "text"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "orange",
+                          "value": 70
+                        },
+                        {
+                          "color": "red",
+                          "value": 90
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "used_bytes"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Used"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "size_bytes"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Size"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 12,
+            "w": 24,
+            "x": 0,
+            "y": 137
+          },
+          "id": 9110,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": false
+            },
+            "showHeader": true
+          },
+          "pluginVersion": "11.1.4",
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\")\n  |> filter(fn: (r) => r._field == \"storage_usage_pct\" or r._field == \"storage_size\" or r._field == \"storage_used\" or r._field == \"allocation_units\")\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(data processor|hardware packet buffers|packet buffers|packet buffer|packet descriptors|on-chip|descriptor)/)\n  |> last()\n  |> group(columns: [\"storage_index\", \"storage_descr\"])\n  |> pivot(rowKey: [\"storage_index\", \"storage_descr\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({ r with\n    pool: r.storage_descr + \" [hrStorage \" + string(v: r.storage_index) + \"]\",\n    storage_type: if r.storage_descr =~ /(?i)(packet descriptors|on-chip|descriptor)/ then \"Packet descriptors\" else if r.storage_descr =~ /(?i)(hardware packet buffers|packet buffers|packet buffer)/ then \"Packet buffers\" else if r.storage_descr =~ /(?i)(management memory|memory)/ then \"Management memory\" else if r.storage_descr =~ /(?i)(disk|filesystem|tmp|var|opt|root|boot|log)/ then \"Filesystem / disk\" else \"Other hrStorage pool\",\n    used_pct: if exists r.storage_usage_pct then float(v: r.storage_usage_pct) else if exists r.storage_used and exists r.storage_size and r.storage_size > 0 then float(v: r.storage_used) / float(v: r.storage_size) * 100.0 else 0.0,\n    size_bytes: if exists r.storage_size and exists r.allocation_units then float(v: r.storage_size) * float(v: r.allocation_units) else 0.0,\n    used_bytes: if exists r.storage_used and exists r.allocation_units then float(v: r.storage_used) * float(v: r.allocation_units) else 0.0\n  }))\n  |> keep(columns: [\"pool\", \"storage_type\", \"used_pct\", \"used_bytes\", \"size_bytes\"])\n  |> sort(columns: [\"storage_type\", \"pool\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Data Plane Buffer Pools (hrStorage)",
+          "type": "table",
+          "description": "Dataplane packet buffer, descriptor, and data-processor pools from HOST-RESOURCES-MIB hrStorageTable."
         }
       ],
-      "title": "Storage Pools (hrStorage)",
-      "type": "table",
-      "description": "One row per HOST-RESOURCES-MIB hrStorageTable pool. Palo Alto exposes packet buffers, descriptors, management memory, and filesystems through this same table. Repeated packet-buffer rows are distinct SNMP pools, usually different DP/slot/index entries; the hrStorage index is included in Pool to make that visible."
+      "title": "Advanced Resource Troubleshooting - Management Plane / Data Plane",
+      "type": "row"
     }
   ],
   "refresh": "30s",
@@ -2187,14 +2502,14 @@
           "type": "influxdb",
           "uid": "P951FEA4DE68E13C5"
         },
-        "definition": "from(bucket: \"firewalls\")\n  |> range(start: -7d)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and exists r.vsys_id)\n  |> keep(columns: [\"vsys_id\", \"vsys_name\"])\n  |> group()\n  |> map(fn: (r) => ({ r with _value: if exists r.vsys_name and r.vsys_name != \"\" then \"vsys \" + string(v: r.vsys_id) + \" - \" + r.vsys_name else \"vsys \" + string(v: r.vsys_id) }))\n  |> keep(columns: [\"_value\"])\n  |> distinct(column: \"_value\")\n  |> sort(columns: [\"_value\"])",
+        "definition": "from(bucket: \"firewalls\")\n  |> range(start: -7d)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and exists r.vsys_id)\n  |> map(fn: (r) => ({ _value: string(v: r.vsys_id) }))\n  |> group()\n  |> distinct(column: \"_value\")\n  |> sort(columns: [\"_value\"])",
         "hide": 2,
         "includeAll": true,
-        "label": "VSYS",
+        "label": "VSYS ID",
         "multi": true,
         "name": "vsys",
         "options": [],
-        "query": "from(bucket: \"firewalls\")\n  |> range(start: -7d)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and exists r.vsys_id)\n  |> keep(columns: [\"vsys_id\", \"vsys_name\"])\n  |> group()\n  |> map(fn: (r) => ({ r with _value: if exists r.vsys_name and r.vsys_name != \"\" then \"vsys \" + string(v: r.vsys_id) + \" - \" + r.vsys_name else \"vsys \" + string(v: r.vsys_id) }))\n  |> keep(columns: [\"_value\"])\n  |> distinct(column: \"_value\")\n  |> sort(columns: [\"_value\"])",
+        "query": "from(bucket: \"firewalls\")\n  |> range(start: -7d)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and exists r.vsys_id)\n  |> map(fn: (r) => ({ _value: string(v: r.vsys_id) }))\n  |> group()\n  |> distinct(column: \"_value\")\n  |> sort(columns: [\"_value\"])",
         "refresh": 2,
         "regex": "",
         "skipUrlSync": true,

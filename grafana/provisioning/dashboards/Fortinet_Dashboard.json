@@ -549,8 +549,8 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 7,
-            "w": 12,
+            "h": 10,
+            "w": 24,
             "x": 0,
             "y": 47
           },
@@ -563,8 +563,9 @@
                 "max"
               ],
               "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
+              "placement": "right",
+              "showLegend": true,
+              "width": 420
             },
             "tooltip": {
               "mode": "multi",
@@ -586,7 +587,7 @@
           "description": "Repeated automatically for every non-management interface on the selected firewall.",
           "repeat": "interface",
           "repeatDirection": "h",
-          "maxPerRow": 2
+          "maxPerRow": 1
         }
       ],
       "title": "Interface Errors / Discards",
