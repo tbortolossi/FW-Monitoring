@@ -135,7 +135,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 4
       },
@@ -148,8 +148,9 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "placement": "right",
+          "showLegend": true,
+          "width": 420
         },
         "tooltip": {
           "mode": "multi",
@@ -245,8 +246,8 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 7,
-        "w": 12,
+        "h": 8,
+        "w": 24,
         "x": 0,
         "y": 22
       },
@@ -259,8 +260,9 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "placement": "right",
+          "showLegend": true,
+          "width": 420
         },
         "tooltip": {
           "mode": "multi",
@@ -300,10 +302,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 22
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 30
       },
       "id": 4,
       "options": {
@@ -314,8 +316,9 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "placement": "right",
+          "showLegend": true,
+          "width": 420
         },
         "tooltip": {
           "mode": "multi",
@@ -358,7 +361,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 29
+        "y": 38
       },
       "id": 5,
       "options": {
@@ -371,7 +374,7 @@
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "width": 360
+          "width": 420
         },
         "tooltip": {
           "mode": "multi",
@@ -414,7 +417,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 46
       },
       "id": 6,
       "options": {
@@ -425,8 +428,9 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "placement": "right",
+          "showLegend": true,
+          "width": 420
         },
         "tooltip": {
           "mode": "multi",
@@ -452,7 +456,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 54
       },
       "id": 9001,
       "panels": [
@@ -479,7 +483,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 46
+            "y": 55
           },
           "id": 7,
           "options": {
@@ -526,7 +530,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 55
       },
       "id": 9004,
       "panels": [
@@ -553,7 +557,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 47
+            "y": 56
           },
           "id": 8,
           "options": {
@@ -600,7 +604,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 47
+        "y": 56
       },
       "id": 9002,
       "panels": [
@@ -627,7 +631,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 48
+            "y": 57
           },
           "id": 9,
           "options": {
@@ -683,7 +687,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 58
+            "y": 67
           },
           "id": 10,
           "options": {
@@ -726,7 +730,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 57
       },
       "id": 9003,
       "panels": [
@@ -753,7 +757,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 49
+            "y": 58
           },
           "id": 11,
           "options": {
@@ -766,7 +770,7 @@
               "displayMode": "table",
               "placement": "right",
               "showLegend": true,
-              "width": 360
+              "width": 420
             },
             "tooltip": {
               "mode": "multi",
@@ -809,7 +813,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 57
+            "y": 66
           },
           "id": 12,
           "options": {
