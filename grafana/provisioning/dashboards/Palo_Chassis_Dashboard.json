@@ -593,7 +593,7 @@
       "type": "row"
     },
     {
-      "collapsed": true,
+      "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -623,7 +623,7 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 8,
+            "w": 12,
             "x": 0,
             "y": 46
           },
@@ -650,7 +650,7 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and (r._field == \"active_sessions\" or r._field == \"session_utilization_pct\"))\n  |> map(fn: (r) => ({ r with _field: r.vsys_name + \" \" + (if r._field == \"active_sessions\" then \"sessions\" else \"utilization\") }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and (r._field == \"active_sessions\" or r._field == \"session_utilization_pct\"))\n  |> map(fn: (r) => ({ r with vsys_label: if exists r.vsys_name and r.vsys_name != \"\" then \"vsys \" + string(v: r.vsys_id) + \" - \" + r.vsys_name else \"vsys \" + string(v: r.vsys_id) }))\n  |> filter(fn: (r) => r.vsys_label == \"${vsys}\")\n  |> map(fn: (r) => ({ r with _field: if r._field == \"active_sessions\" then \"sessions\" else \"utilization\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
@@ -678,8 +678,8 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 8,
-            "x": 8,
+            "w": 12,
+            "x": 12,
             "y": 46
           },
           "id": 10,
@@ -705,7 +705,7 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and (r._field == \"tcp_cps\" or r._field == \"udp_cps\" or r._field == \"other_ip_cps\" or r._field == \"total_cps\"))\n  |> map(fn: (r) => ({ r with _field: r.vsys_name + \" \" + r._field }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and (r._field == \"tcp_cps\" or r._field == \"udp_cps\" or r._field == \"other_ip_cps\" or r._field == \"total_cps\"))\n  |> map(fn: (r) => ({ r with vsys_label: if exists r.vsys_name and r.vsys_name != \"\" then \"vsys \" + string(v: r.vsys_id) + \" - \" + r.vsys_name else \"vsys \" + string(v: r.vsys_id) }))\n  |> filter(fn: (r) => r.vsys_label == \"${vsys}\")\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
@@ -733,9 +733,9 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 46
+            "w": 24,
+            "x": 0,
+            "y": 54
           },
           "id": 13,
           "options": {
@@ -760,16 +760,19 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_zones\" and r.hostname == \"${hostname}\" and (r._field == \"tcp_cps\" or r._field == \"udp_cps\" or r._field == \"other_ip_cps\"))\n  |> map(fn: (r) => ({ r with _field: r.zone + \" \" + r._field }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "import \"regexp\"\n\nselectedVsys = from(bucket: \"firewalls\")\n  |> range(start: -7d)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and exists r.vsys_id)\n  |> map(fn: (r) => ({ r with vsys_label: if exists r.vsys_name and r.vsys_name != \"\" then \"vsys \" + string(v: r.vsys_id) + \" - \" + r.vsys_name else \"vsys \" + string(v: r.vsys_id) }))\n  |> filter(fn: (r) => r.vsys_label == \"${vsys}\")\n  |> keep(columns: [\"vsys_id\"])\n  |> group()\n  |> distinct(column: \"vsys_id\")\n  |> findRecord(fn: (key) => true, idx: 0)\n\nvsysId = string(v: selectedVsys.vsys_id)\n\nfrom(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_zones\" and r.hostname == \"${hostname}\" and exists r.index and exists r.zone and (r._field == \"tcp_cps\" or r._field == \"udp_cps\" or r._field == \"other_ip_cps\"))\n  |> map(fn: (r) => ({ r with zone_vsys_id: regexp.findString(r: /[0-9]+$/, v: r.index) }))\n  |> filter(fn: (r) => r.zone_vsys_id == vsysId)\n  |> map(fn: (r) => ({ r with _field: r.zone + \" \" + r._field }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
           "title": "Zone CPS",
-          "type": "timeseries"
+          "type": "timeseries",
+          "description": "Zone CPS for the current VSYS. The row label includes VSYS id and name when available."
         }
       ],
-      "title": "Contexts",
-      "type": "row"
+      "title": "Context - ${vsys}",
+      "type": "row",
+      "repeat": "vsys",
+      "repeatDirection": "v"
     },
     {
       "collapsed": true,
@@ -1870,12 +1873,13 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and r._field == \"storage_usage_pct\")\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(management memory|packet descriptors|packet buffers|packet buffer|descriptor)/)\n  |> map(fn: (r) => ({ r with _field: r.storage_descr }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and r._field == \"storage_usage_pct\")\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(data processor|hardware packet buffers|packet buffers|packet buffer|packet descriptors|on-chip|descriptor)/)\n  |> map(fn: (r) => ({ r with _field: r.storage_descr }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
           "refId": "A"
         }
       ],
       "title": "Memory and Packet Buffer Usage",
-      "type": "timeseries"
+      "type": "timeseries",
+      "description": "Dataplane packet buffer and descriptor pools from HOST-RESOURCES hrStorageTable. Management-plane memory is intentionally excluded here."
     },
     {
       "datasource": {
@@ -1900,9 +1904,119 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "storage_index"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Index"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "storage_descr"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Description"
+              },
+              {
+                "id": "custom.width",
+                "value": 360
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "storage_size"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Size"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "storage_used"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Used"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "allocation_units"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Unit bytes"
+              },
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "used_pct"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Used %"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "lcd",
+                  "valueDisplayMode": "color"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 9,
@@ -1930,7 +2044,7 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\")\n  |> filter(fn: (r) => r._field == \"storage_usage_pct\" or r._field == \"storage_size\" or r._field == \"storage_used\" or r._field == \"allocation_units\")\n  |> last()\n  |> keep(columns: [\"_time\", \"storage_index\", \"storage_descr\", \"_field\", \"_value\"])",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\")\n  |> filter(fn: (r) => r._field == \"storage_usage_pct\" or r._field == \"storage_size\" or r._field == \"storage_used\" or r._field == \"allocation_units\")\n  |> last()\n  |> pivot(rowKey: [\"storage_index\", \"storage_descr\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({ r with used_pct: if exists r.storage_usage_pct then float(v: r.storage_usage_pct) else if exists r.storage_used and exists r.storage_size and r.storage_size > 0 then float(v: r.storage_used) / float(v: r.storage_size) * 100.0 else 0.0 }))\n  |> keep(columns: [\"storage_index\", \"storage_descr\", \"storage_size\", \"storage_used\", \"allocation_units\", \"used_pct\"])\n  |> sort(columns: [\"storage_descr\"])",
           "refId": "A"
         }
       ],
@@ -2051,6 +2165,30 @@
         "skipUrlSync": true,
         "sort": 1,
         "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "influxdb",
+          "uid": "P951FEA4DE68E13C5"
+        },
+        "definition": "from(bucket: \"firewalls\")\n  |> range(start: -7d)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and exists r.vsys_id)\n  |> keep(columns: [\"vsys_id\", \"vsys_name\"])\n  |> group()\n  |> map(fn: (r) => ({ r with _value: if exists r.vsys_name and r.vsys_name != \"\" then \"vsys \" + string(v: r.vsys_id) + \" - \" + r.vsys_name else \"vsys \" + string(v: r.vsys_id) }))\n  |> keep(columns: [\"_value\"])\n  |> distinct(column: \"_value\")\n  |> sort(columns: [\"_value\"])",
+        "hide": 2,
+        "includeAll": true,
+        "label": "VSYS",
+        "multi": true,
+        "name": "vsys",
+        "options": [],
+        "query": "from(bucket: \"firewalls\")\n  |> range(start: -7d)\n  |> filter(fn: (r) => r._measurement == \"vsys\" and r.hostname == \"${hostname}\" and exists r.vsys_id)\n  |> keep(columns: [\"vsys_id\", \"vsys_name\"])\n  |> group()\n  |> map(fn: (r) => ({ r with _value: if exists r.vsys_name and r.vsys_name != \"\" then \"vsys \" + string(v: r.vsys_id) + \" - \" + r.vsys_name else \"vsys \" + string(v: r.vsys_id) }))\n  |> keep(columns: [\"_value\"])\n  |> distinct(column: \"_value\")\n  |> sort(columns: [\"_value\"])",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": true,
+        "sort": 1,
+        "type": "query"
       }
     ]
   },
@@ -2062,6 +2200,6 @@
   "timezone": "browser",
   "title": "Palo Alto Chassis Monitoring",
   "uid": "palo-chassis-monitoring",
-  "version": 22,
+  "version": 23,
   "weekStart": ""
 }

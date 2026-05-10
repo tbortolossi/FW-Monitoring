@@ -853,6 +853,7 @@
     name         = "pan_zones"
     inherit_tags = ["hostname"]
     oid          = "PAN-COMMON-MIB::panZoneTable"
+    index_as_tag = true
 
     [[inputs.snmp.table.field]]
       oid    = "PAN-COMMON-MIB::panZoneName"
