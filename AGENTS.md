@@ -77,6 +77,15 @@ docker compose logs -f telegraf
 
 This workspace may be edited from Windows, but the generator is intended for Linux hosts. Be careful with line endings in shell scripts; keep `generate.sh` LF.
 
+## Versioning and Releases
+
+- The current project version is stored in `VERSION`.
+- Use semantic versioning. Dashboard-only fixes and small operator-facing improvements are usually patch releases.
+- When preparing a release, update both `VERSION` and `CHANGELOG.md` in the same commit.
+- Tags use the `vX.Y.Z` format and should match `VERSION`.
+- After tagging and pushing, create a GitHub Release for the tag when previous releases exist.
+- Do not bump versions, create tags, or publish releases unless the user explicitly asks for a new version or release.
+
 ## Coding Guidelines
 
 - Prefer small, practical changes that improve installability and reduce operator friction.
