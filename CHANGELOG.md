@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2 - 2026-05-12
+
+### Added
+
+- Collapsible HA role timeline in Palo Alto, Palo Alto chassis, and Fortinet dashboards to correlate Active/Passive role changes with firewall load.
+
 ## 1.0.0 - 2026-05-07
 
 Initial public release.
