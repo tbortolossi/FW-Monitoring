@@ -458,6 +458,102 @@
         "x": 0,
         "y": 54
       },
+      "id": 9006,
+      "panels": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "description": "HA role history. Expand this row when correlating CPU, sessions, or throughput with Active/Passive role changes. The query only returns Active/Passive samples, so standalone firewalls do not show a misleading HA timeline.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "fillOpacity": 70,
+                "lineWidth": 0,
+                "spanNulls": false
+              },
+              "mappings": [
+                {
+                  "options": {
+                    "Active": {
+                      "color": "green",
+                      "index": 0,
+                      "text": "Active"
+                    }
+                  },
+                  "type": "value"
+                },
+                {
+                  "options": {
+                    "Passive": {
+                      "color": "blue",
+                      "index": 1,
+                      "text": "Passive"
+                    }
+                  },
+                  "type": "value"
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 24,
+            "x": 0,
+            "y": 55
+          },
+          "id": 1006,
+          "options": {
+            "alignValue": "center",
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "mergeValues": true,
+            "rowHeight": 0.9,
+            "showValue": "always",
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_vdoms\" and r.hostname == \"${hostname}\" and r._field == \"ha_state\")\n  |> map(fn: (r) => ({ r with\n    _field: if exists r.vdom then r.vdom + \" HA role\" else \"HA role\",\n    _value: if r._value == 1 then \"Active\" else if r._value == 2 then \"Passive\" else \"\"\n  }))\n  |> filter(fn: (r) => r._value == \"Active\" or r._value == \"Passive\")\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "HA Role Changes",
+          "type": "state-timeline"
+        }
+      ],
+      "title": "HA Role Changes",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
       "id": 9001,
       "panels": [
         {
@@ -530,7 +626,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 56
       },
       "id": 9004,
       "panels": [
@@ -604,7 +700,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 57
       },
       "id": 9002,
       "panels": [
@@ -730,7 +826,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 58
       },
       "id": 9003,
       "panels": [
