@@ -13,7 +13,9 @@ Run a standard-library Python collector under Telegraf `inputs.execd`. It schedu
 
 Keep API monitoring optional under each Palo Alto inventory entry. Allow `api_monitoring.host` to override the top-level SNMP address when HTTPS reaches the same device through another interface or DNS name. Accept either `api_key` directly in the ignored local `firewalls.yml`, matching the existing SNMP credential workflow, or `api_key_env` referencing `.env`. During generation, copy only the required API keys into a mode-`0600` runtime environment file for Telegraf, rather than exposing every stack secret to that container. Send keys in the `X-PAN-KEY` request header and verify TLS by default.
 
-Use one API dashboard for compact and chassis platforms. Per-core CPU carries `dataplane` and `core` tags. Keep this dashboard API-only: calculate throughput from deltas of the per-interface hardware `ibytes` and `obytes` counters returned by `show counter interface all`. Do not use the session throughput summary. The standard dashboards continue using SNMP `ifHCInOctets` and `ifHCOutOctets`.
+Use one API dashboard for compact and chassis platforms. Per-core CPU carries `dataplane` and `core` tags, and Grafana repeats a collapsible detail row for every dataplane. Collect resource pressure per dataplane, interface operational metadata, HA state, storage, and environmental sensors on slower schedules than session and octet counters.
+
+Keep this dashboard API-only: calculate throughput from deltas of the per-interface hardware `ibytes` and `obytes` counters returned by `show counter interface all`. Do not use the session throughput summary. The standard dashboards continue using SNMP `ifHCInOctets` and `ifHCOutOctets`.
 
 ## Consequences
 

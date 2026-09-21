@@ -10,10 +10,16 @@ from telegraf.paloalto_api_collector import (
     line_protocol,
     load_environment_file,
     parse_dataplane_resources,
+    parse_dataplane_utilization,
+    parse_environmentals,
     parse_global_counters,
+    parse_ha_state,
     parse_interface_counters,
+    parse_interface_status,
     parse_management_resources,
     parse_sessions,
+    parse_storage,
+    parse_system_info,
     request_xml,
 )
 
@@ -32,6 +38,21 @@ class CollectorParsingTests(unittest.TestCase):
                 "sessions_tcp": 200,
                 "cps": 17,
                 "session_utilization_pct": 25.0,
+            },
+        )
+
+    def test_system_info_includes_numeric_uptime(self):
+        result = ET.fromstring(
+            "<result><system><model>PA-440</model><sw-version>12.2.2</sw-version>"
+            "<uptime>3 days, 20:20:21</uptime></system></result>"
+        )
+        self.assertEqual(
+            parse_system_info(result),
+            {
+                "model": "PA-440",
+                "panos_version": "12.2.2",
+                "uptime": "3 days, 20:20:21",
+                "uptime_seconds": 332421,
             },
         )
 
@@ -74,6 +95,44 @@ class CollectorParsingTests(unittest.TestCase):
         self.assertEqual(indexed[("dp0", "average")], 23.5)
         self.assertTrue(all(isinstance(value, float) for value in indexed.values()))
 
+    def test_dataplane_cpu_ignores_maximum_table(self):
+        result = ET.fromstring(
+            "<result><data-processors><dp0><second>"
+            "<cpu-load-average><entry><coreid>0</coreid><value>12</value></entry></cpu-load-average>"
+            "<cpu-load-maximum><entry><coreid>0</coreid><value>99</value></entry></cpu-load-maximum>"
+            "</second></dp0></data-processors></result>"
+        )
+        indexed = {(tags["dataplane"], tags["core"]): fields["cpu_pct"] for tags, fields in parse_dataplane_resources(result)}
+        self.assertEqual(indexed[("dp0", "0")], 12.0)
+        self.assertEqual(indexed[("dp0", "average")], 12.0)
+
+    def test_dataplane_name_can_be_an_entry_attribute(self):
+        result = ET.fromstring(
+            '<result><data-processors><entry name="s2dp1"><second>'
+            "<cpu-load-average><entry><coreid>3</coreid><value>67</value></entry>"
+            "</cpu-load-average></second></entry></data-processors></result>"
+        )
+        indexed = {
+            (tags["dataplane"], tags["core"]): fields["cpu_pct"]
+            for tags, fields in parse_dataplane_resources(result)
+        }
+        self.assertEqual(indexed[("s2dp1", "3")], 67.0)
+
+    def test_dataplane_resource_utilization_is_kept_per_dp(self):
+        result = ET.fromstring(
+            "<result><data-processors><s1dp0><second><resource-utilization>"
+            "<entry><name>packet buffer</name><value>41</value></entry>"
+            "<entry><name>packet descriptor</name><value>12</value></entry>"
+            "</resource-utilization></second></s1dp0></data-processors></result>"
+        )
+        self.assertEqual(
+            parse_dataplane_utilization(result),
+            [
+                ({"dataplane": "s1dp0", "resource": "packet_buffer"}, {"utilization_pct": 41.0}),
+                ({"dataplane": "s1dp0", "resource": "packet_descriptor"}, {"utilization_pct": 12.0}),
+            ],
+        )
+
     def test_global_counter_allowlist_bounds_cardinality(self):
         result = ET.fromstring(
             "<result><counters>"
@@ -108,6 +167,62 @@ class CollectorParsingTests(unittest.TestCase):
                     },
                 ),
                 ({"interface": "ethernet1/2"}, {"in_octets": 0, "out_octets": 7528446}),
+            ],
+        )
+
+    def test_interface_status_merges_hardware_and_logical_details(self):
+        result = ET.fromstring(
+            "<result><hw><entry><name>ethernet1/1</name><speed>1000</speed>"
+            "<duplex>full</duplex><state>up</state><mode>(autoneg)</mode></entry></hw>"
+            "<ifnet><entry><name>ethernet1/1</name><zone>outside</zone><vsys>1</vsys>"
+            "<fwd>vr:default</fwd></entry></ifnet></result>"
+        )
+        self.assertEqual(
+            parse_interface_status(result),
+            [
+                (
+                    {"interface": "ethernet1/1"},
+                    {
+                        "speed_mbps": 1000,
+                        "duplex": "full",
+                        "state": "up",
+                        "mode": "(autoneg)",
+                        "zone": "outside",
+                        "vsys": "1",
+                        "forwarding": "vr:default",
+                    },
+                )
+            ],
+        )
+
+    def test_ha_disabled_is_reported_as_standalone(self):
+        result = ET.fromstring("<result><enabled>no</enabled></result>")
+        self.assertEqual(parse_ha_state(result), {"enabled": False, "state": "standalone"})
+
+    def test_disk_space_text_is_parsed(self):
+        result = ET.fromstring(
+            "<result>Filesystem Size Used Avail Use% Mounted on\n"
+            "/dev/root 21G 7.3G 12G 38% /\n/dev/logs 512M 128M 384M 25% /logs</result>"
+        )
+        points = parse_storage(result)
+        self.assertEqual(points[0][0], {"filesystem": "/dev/root", "mount": "/"})
+        self.assertEqual(points[0][1]["total_bytes"], 21 * 1024**3)
+        self.assertEqual(points[0][1]["used_pct"], 38.0)
+        self.assertEqual(points[1][1]["total_bytes"], 512 * 1024**2)
+
+    def test_environmental_sensor_values_are_numeric(self):
+        result = ET.fromstring(
+            "<result><thermal><entry><slot>1</slot><description>CPU</description>"
+            "<alarm>False</alarm><DegreesC>42</DegreesC><min>5</min><max>90</max>"
+            "</entry></thermal></result>"
+        )
+        self.assertEqual(
+            parse_environmentals(result, "thermal"),
+            [
+                (
+                    {"sensor_type": "thermal", "slot": "1", "description": "CPU"},
+                    {"degrees_c": 42, "min": 5, "max": 90, "alarm": "False"},
+                )
             ],
         )
 

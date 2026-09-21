@@ -3,7 +3,7 @@
 Suggested GitHub description:
 
 ```text
-SNMP-only Palo Alto and Fortinet firewall monitoring stack with Docker Compose, Telegraf, InfluxDB, and Grafana.
+Palo Alto and Fortinet firewall monitoring with SNMP plus optional PAN-OS XML API dashboards, using Docker Compose, Telegraf, InfluxDB, and Grafana.
 ```
 
 Suggested topics:
@@ -11,6 +11,7 @@ Suggested topics:
 ```text
 firewall-monitoring
 snmp
+paloalto-api
 paloalto
 fortinet
 fortigate
@@ -26,5 +27,5 @@ netops
 Short project pitch:
 
 ```text
-FW-Monitoring provides a simple Docker Compose stack for polling Palo Alto and Fortinet firewalls over SNMP and visualizing CPU, memory, sessions, CPS, disk, interface status, interface throughput, errors, discards, and chassis metrics in Grafana.
+FW-Monitoring provides a simple Docker Compose stack for polling Palo Alto and Fortinet firewalls over SNMP, with optional PAN-OS XML API performance monitoring, and visualizing CPU, memory, sessions, CPS, disk, interface status, throughput, errors, discards, and chassis metrics in Grafana.
 ```

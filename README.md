@@ -14,7 +14,7 @@ The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB 
 
 - InfluxDB 2.x for time series storage
 - Telegraf SNMP polling generated from `firewalls.yml`
-- Optional Palo Alto XML API polling for sessions, management-plane resources, per-core/dataplane CPU, hardware interface throughput, and selected drop counters
+- Optional Palo Alto XML API polling for sessions, management-plane resources, per-core/dataplane CPU, interface state and throughput, HA, storage, environmental sensors, and selected drop counters
 - Grafana with provisioned InfluxDB datasource
 - Four monitoring dashboards:
   - `Palo Alto Firewall Monitoring`
@@ -365,7 +365,11 @@ Use a unique `hostname` for every firewall and, when using `.env`, a clear uniqu
 
 The collector polls API categories sequentially for each firewall and only parallelizes between firewalls. Session and hardware interface counters use `interval`, which cannot be configured below 10 seconds. Global counters are restricted to a small allowlist of high-value drop/failure counters to bound InfluxDB cardinality and management-plane load.
 
-The `Palo Alto API Performance Monitoring` dashboard works for both compact and multi-blade systems and reads only PAN-OS XML API measurements. Data-plane CPU is tagged by dataplane and core and includes a per-dataplane average, so PA-7000/PA-7500 results appear as additional series without a separate chassis dashboard. The dashboard calculates throughput from deltas of the per-interface hardware `ibytes` / `obytes` counters returned by the PAN-OS API; it does not use the less reliable session throughput summary.
+The `Palo Alto API Performance Monitoring` dashboard works for both compact and multi-blade systems and reads only PAN-OS XML API measurements. Its main view mirrors the standard dashboard with platform, PAN-OS version, uptime, MP/DP CPU, RAM, sessions, CPS, session utilization, and global throughput. Additional details are grouped into collapsible sections for HA, interfaces, errors/discards, session protocols, drop counters, MP load/storage, and environmental sensors.
+
+Data-plane CPU is tagged by dataplane and core. Grafana creates one collapsible row per dataplane, containing its individual core curves and API resource pressure (sessions, packet buffers, packet descriptors, and software tags when exposed). This supports compact systems and multi-DP chassis such as PA-5500/PA-7000/PA-7500 without requiring a separate API chassis dashboard.
+
+The interface section includes API-derived throughput and packet-rate curves per interface plus current link state, speed, duplex, mode, zone, VSYS, and forwarding instance. Throughput is calculated from deltas of the hardware `ibytes` / `obytes` counters returned by `show counter interface all`; it does not use SNMP or the less reliable session throughput summary.
 
 ## Upgrade an Existing Installation
 
