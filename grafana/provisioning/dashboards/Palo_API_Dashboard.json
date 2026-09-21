@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Basic Palo Alto performance monitoring through the PAN-OS XML API. API metrics cover sessions, MP resources, per-core/per-dataplane CPU and bounded global counters; throughput remains SNMP octet-counter based for accuracy.",
+  "description": "Basic Palo Alto performance monitoring through the PAN-OS XML API: sessions, MP resources, per-core/per-dataplane CPU, hardware interface throughput and bounded global counters.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -576,13 +576,13 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "global = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and (r._field == \"mp_cpu_pct\" or r._field == \"dp_cpu_pct\"))\n  |> map(fn: (r) => ({ r with _field: if r._field == \"mp_cpu_pct\" then \"Global MP\" else \"Global DP\" }))\nprocessors = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_processors\" and r.hostname == \"${hostname}\" and r._field == \"processor_load_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Processor \" + string(v: r.device_index) }))\nunion(tables: [global, processors])\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+          "query": "management = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"mp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Management plane\" }))\ndataplanes = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane + \" average\" }))\nunion(tables: [management, dataplanes])\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
           "refId": "A"
         }
       ],
-      "title": "Global and All SNMP Processor CPU",
+      "title": "Management and Dataplane CPU Overview",
       "type": "timeseries",
-      "description": "Global MP/DP CPU plus every processor exposed by pan_hr_processors. This helps reveal imbalance or a saturated processor/dataplane."
+      "description": "API-only overview of management-plane CPU and the calculated average for every dataplane. Use the per-core panel above to reveal imbalance or a saturated core."
     },
     {
       "datasource": {
@@ -632,13 +632,13 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.ifName !~ /\\./ and r._field =~ /^ifHC(In|Out)Octets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: if r._field == \"ifHCInOctets\" then \"In\" else \"Out\" }))\n  |> group(columns: [\"_time\", \"_field\"])\n  |> sum()\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.interface !~ /\\./ and r._field =~ /^(in|out)_octets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: if r._field == \"in_octets\" then \"In\" else \"Out\" }))\n  |> group(columns: [\"_time\", \"_field\"])\n  |> sum()\n  |> group(columns: [\"_field\"])",
           "refId": "A"
         }
       ],
-      "title": "Interface Throughput (SNMP Octet Counters)",
+      "title": "Interface Throughput (API Hardware Octet Counters)",
       "type": "timeseries",
-      "description": "Throughput intentionally comes from ifHCInOctets/ifHCOutOctets. API session throughput can miss offloaded or bypassed traffic."
+      "description": "Calculated from deltas of the per-interface PAN-OS hardware ibytes/obytes counters returned by show counter interface all. Session throughput summaries are not used."
     },
     {
       "datasource": {

@@ -8,9 +8,9 @@ This project should provide an easy-to-install Docker Compose stack for basic Pa
 
 The core use case is helping users understand what a firewall is actually doing with minimal setup. Prioritize CPU, RAM, sessions, CPS, disk where useful, interface status, and interface throughput over deep feature-specific monitoring.
 
-Throughput must be calculated from interface octet counters (`ifHCInOctets` / `ifHCOutOctets`) for both Palo Alto and Fortinet. Dataplane, NPU, or feature counters can be incomplete when traffic is offloaded or bypasses the counter path.
+Throughput must be calculated from cumulative interface octet counters. The standard Palo Alto and Fortinet dashboards use `ifHCInOctets` / `ifHCOutOctets`. The Palo Alto API dashboard is intentionally API-only and uses the hardware `ibytes` / `obytes` counters from `show counter interface all`. Do not use dataplane, NPU, session, or feature throughput summaries, which can be incomplete when traffic is offloaded or bypasses their counter path.
 
-For CPU views, dashboards should show both the global CPU and every per-processor/dataplane CPU exposed by the vendor MIB (`pan_hr_processors` for Palo Alto and `fortinet_processors` for Fortinet). The global line is useful for quick reading; per-CPU lines reveal imbalance and saturated dataplanes.
+For CPU views, the standard SNMP dashboards should show both the global CPU and every per-processor/dataplane CPU exposed by the vendor MIB (`pan_hr_processors` for Palo Alto and `fortinet_processors` for Fortinet). The Palo Alto API dashboard must remain API-only and show management-plane CPU plus every dataplane/core returned by `resource-monitor`. The overview is useful for quick reading; per-CPU lines reveal imbalance and saturated dataplanes.
 
 The expected user journey is:
 

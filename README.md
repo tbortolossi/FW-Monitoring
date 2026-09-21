@@ -8,13 +8,13 @@ Docker Compose stack for quick Palo Alto and Fortinet firewall monitoring with T
 
 The goal is simple operational visibility: CPU, memory, sessions, CPS, disk where useful, interface status, errors/discards, and throughput. It is useful when you need a quick factual view of firewall load without deploying a full NMS.
 
-For both vendors, throughput is calculated from IF-MIB interface counters (`ifHCInOctets` and `ifHCOutOctets`). This is intentional: dataplane, NPU, or feature counters can miss traffic that is offloaded or handled outside that counter path.
+The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB interface counters (`ifHCInOctets` and `ifHCOutOctets`). The optional API-only Palo Alto dashboard instead uses the hardware interface byte counters returned by `show counter interface all`. Neither path uses session or feature throughput summaries, which can miss offloaded traffic.
 
 ## What You Get
 
 - InfluxDB 2.x for time series storage
 - Telegraf SNMP polling generated from `firewalls.yml`
-- Optional Palo Alto XML API polling for sessions, management-plane resources, per-core/dataplane CPU, and selected drop counters
+- Optional Palo Alto XML API polling for sessions, management-plane resources, per-core/dataplane CPU, hardware interface throughput, and selected drop counters
 - Grafana with provisioned InfluxDB datasource
 - Four monitoring dashboards:
   - `Palo Alto Firewall Monitoring`
@@ -181,7 +181,7 @@ SNMPv2c is also supported:
 
 ## Palo Alto XML API Setup
 
-API monitoring is optional and Palo Alto-only. It complements SNMP; it does not replace the SNMP interface counters used for accurate throughput.
+API monitoring is optional and Palo Alto-only. Its dedicated dashboard is API-only, including interface throughput; the existing SNMP dashboards remain unchanged.
 
 Create a dedicated PAN-OS administrator with a custom role that grants only XML API **Operational Requests** and **Show** access. Avoid using a full superuser account for ongoing collection.
 
@@ -303,9 +303,9 @@ API monitoring is configured independently for every Palo Alto entry. Firewalls 
 
 Use a unique `hostname` for every firewall and, when using `.env`, a clear unique variable name for every device. Run `paloalto_api_key.py` once per firewall that needs a generated key, or add existing keys manually. The collector serializes calls within one firewall and polls different firewalls in parallel, so adding a slow device does not block the others.
 
-The collector polls API categories sequentially for each firewall and only parallelizes between firewalls. Session polling cannot be configured below 10 seconds. Global counters are restricted to a small allowlist of high-value drop/failure counters to bound InfluxDB cardinality and management-plane load.
+The collector polls API categories sequentially for each firewall and only parallelizes between firewalls. Session and hardware interface counters use `interval`, which cannot be configured below 10 seconds. Global counters are restricted to a small allowlist of high-value drop/failure counters to bound InfluxDB cardinality and management-plane load.
 
-The `Palo Alto API Performance Monitoring` dashboard works for both compact and multi-blade systems. Data-plane CPU is tagged by dataplane and core and includes a per-dataplane average, so PA-7000/PA-7500 results appear as additional series without a separate chassis dashboard. A complementary CPU panel shows the global MP/DP values and every processor exposed by `pan_hr_processors`. Interface throughput on this dashboard still comes from SNMP `ifHCInOctets` / `ifHCOutOctets`, because API throughput summaries can omit offloaded traffic.
+The `Palo Alto API Performance Monitoring` dashboard works for both compact and multi-blade systems and reads only PAN-OS XML API measurements. Data-plane CPU is tagged by dataplane and core and includes a per-dataplane average, so PA-7000/PA-7500 results appear as additional series without a separate chassis dashboard. The dashboard calculates throughput from deltas of the per-interface hardware `ibytes` / `obytes` counters returned by the PAN-OS API; it does not use the less reliable session throughput summary.
 
 ## Upgrade an Existing Installation
 
@@ -577,6 +577,8 @@ These files/directories are generated locally and ignored by Git:
 
 - Palo Alto Networks SNMP monitoring documentation: https://docs.paloaltonetworks.com/pan-os/11-1/pan-os-admin/monitoring/snmp-monitoring-and-traps/monitor-statistics-using-snmp
 - Palo Alto Networks XML API request types: https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions
+- Palo Alto Networks operational commands through the XML API: https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions/run-operational-mode-commands-api
+- Palo Alto Networks operational CLI command hierarchy: https://docs.paloaltonetworks.com/ngfw/pan-os-cli-quick-start/cli-command-hierarchy
 - Palo Alto Networks XML API request structure and authentication: https://docs.paloaltonetworks.com/ngfw/api/getting-started/structure-of-a-pan-os-xml-api-request
 - Palo Alto Networks CLI command hierarchy for SNMPv3: https://docs.paloaltonetworks.com/pan-os/11-1/pan-os-cli-quick-start/cli-command-hierarchy/pan-os-11-1-configure-cli-command-hierarchy
 - Fortinet `config system snmp user`: https://docs.fortinet.com/document/fortigate/7.6.3/cli-reference/292257317/config-system-snmp-user

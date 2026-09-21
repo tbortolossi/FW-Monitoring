@@ -36,6 +36,7 @@ COUNTER_COMMAND = (
     "<show><counter><global><filter><severity>drop</severity></filter>"
     "</global></counter></show>"
 )
+INTERFACE_COMMAND = "<show><counter><interface>all</interface></counter></show>"
 
 # Keep cardinality bounded. These are stable, high-value failure/drop counters.
 COUNTER_ALLOWLIST = {
@@ -290,6 +291,31 @@ def parse_global_counters(result: ET.Element) -> list[tuple[dict, dict]]:
     return points
 
 
+def parse_interface_counters(result: ET.Element) -> list[tuple[dict, dict]]:
+    """Return cumulative hardware interface counters used to derive rates."""
+    aliases = {
+        "ibytes": "in_octets",
+        "obytes": "out_octets",
+        "ipackets": "in_packets",
+        "opackets": "out_packets",
+        "ierrors": "in_errors",
+        "idrops": "in_discards",
+    }
+    points = []
+    for entry in result.findall("./hw/entry"):
+        interface = (entry.findtext("name") or "").strip()
+        if not interface:
+            continue
+        fields = {}
+        for source, destination in aliases.items():
+            value = _number(entry.findtext(source))
+            if value is not None:
+                fields[destination] = value
+        if fields:
+            points.append(({"interface": interface}, fields))
+    return points
+
+
 def _escape(value: object, *, tag: bool = False) -> str:
     text = str(value).replace("\\", "\\\\").replace(" ", "\\ ").replace(",", "\\,")
     if tag:
@@ -323,10 +349,11 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
         "sessions": (SESSION_COMMAND, parse_sessions, "paloalto_api_sessions"),
         "management": (MANAGEMENT_COMMAND, parse_management_resources, "paloalto_api_management"),
         "dataplane": (DATAPLANE_COMMAND, parse_dataplane_resources, "paloalto_api_dataplane_cpu"),
+        "interfaces": (INTERFACE_COMMAND, parse_interface_counters, "paloalto_api_interfaces"),
         "counters": (COUNTER_COMMAND, parse_global_counters, "paloalto_api_counters"),
         "system": (SYSTEM_INFO_COMMAND, parse_system_info, "paloalto_api_system"),
     }
-    for category in ("sessions", "management", "dataplane", "counters", "system"):
+    for category in ("sessions", "interfaces", "management", "dataplane", "counters", "system"):
         if category not in due:
             continue
         command, parser, measurement = commands[category]
@@ -364,7 +391,7 @@ def load_environment_file(path: Path) -> None:
 
 
 def run_once(configs: list[dict], categories: set[str] | None = None) -> int:
-    selected = categories or {"sessions", "management", "dataplane", "counters", "system"}
+    selected = categories or {"sessions", "interfaces", "management", "dataplane", "counters", "system"}
     with ThreadPoolExecutor(max_workers=max(1, min(8, len(configs)))) as executor:
         futures = [executor.submit(collect_firewall, config, selected) for config in configs]
         for future in as_completed(futures):
@@ -379,6 +406,7 @@ def run_daemon(configs: list[dict]) -> int:
     signal.signal(signal.SIGINT, lambda *_args: stopped.set())
     schedules = {
         "sessions": lambda cfg: int(cfg.get("interval", 20)),
+        "interfaces": lambda cfg: int(cfg.get("interval", 20)),
         "management": lambda cfg: int(cfg.get("resource_interval", 60)),
         "dataplane": lambda cfg: int(cfg.get("resource_interval", 60)),
         "counters": lambda cfg: int(cfg.get("counter_interval", 60)),

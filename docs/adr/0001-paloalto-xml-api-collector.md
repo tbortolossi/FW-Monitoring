@@ -5,7 +5,7 @@
 
 ## Context
 
-SNMP provides reliable cross-platform counters, especially interface octets, but PAN-OS exposes richer session and per-core dataplane performance data through operational XML API commands. The feature must support multiple firewalls and chassis without increasing firewall management-plane load unnecessarily or committing API keys.
+SNMP provides reliable cross-platform counters, but PAN-OS also exposes cumulative hardware interface octets plus richer session and per-core dataplane performance data through operational XML API commands. The feature must support multiple firewalls and chassis without increasing firewall management-plane load unnecessarily or committing API keys.
 
 ## Decision
 
@@ -13,7 +13,7 @@ Run a standard-library Python collector under Telegraf `inputs.execd`. It schedu
 
 Keep API monitoring optional under each Palo Alto inventory entry. Accept either `api_key` directly in the ignored local `firewalls.yml`, matching the existing SNMP credential workflow, or `api_key_env` referencing `.env`. During generation, copy only the required API keys into a mode-`0600` runtime environment file for Telegraf, rather than exposing every stack secret to that container. Send keys in the `X-PAN-KEY` request header and verify TLS by default.
 
-Use one API dashboard for compact and chassis platforms. Per-core CPU carries `dataplane` and `core` tags. Continue to calculate throughput from SNMP `ifHCInOctets` and `ifHCOutOctets`, including on the API dashboard.
+Use one API dashboard for compact and chassis platforms. Per-core CPU carries `dataplane` and `core` tags. Keep this dashboard API-only: calculate throughput from deltas of the per-interface hardware `ibytes` and `obytes` counters returned by `show counter interface all`. Do not use the session throughput summary. The standard dashboards continue using SNMP `ifHCInOctets` and `ifHCOutOctets`.
 
 ## Consequences
 

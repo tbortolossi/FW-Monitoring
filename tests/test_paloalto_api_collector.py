@@ -11,6 +11,7 @@ from telegraf.paloalto_api_collector import (
     load_environment_file,
     parse_dataplane_resources,
     parse_global_counters,
+    parse_interface_counters,
     parse_management_resources,
     parse_sessions,
     request_xml,
@@ -81,6 +82,34 @@ class CollectorParsingTests(unittest.TestCase):
             "</counters></result>"
         )
         self.assertEqual(parse_global_counters(result), [({"counter": "flow_policy_deny"}, {"value": 42})])
+
+    def test_hardware_interface_octet_counters_are_collected(self):
+        result = ET.fromstring(
+            "<result><hw>"
+            "<entry><name>ethernet1/1</name><ibytes>112633947248</ibytes>"
+            "<obytes>31443272030</obytes><ipackets>110950488</ipackets>"
+            "<opackets>62988198</opackets><ierrors>2</ierrors><idrops>3</idrops></entry>"
+            "<entry><name>ethernet1/2</name><ibytes>0</ibytes><obytes>7528446</obytes></entry>"
+            "</hw><ifnet><entry><name>ignored-cpu-counter</name><ibytes>999</ibytes></entry></ifnet>"
+            "</result>"
+        )
+        self.assertEqual(
+            parse_interface_counters(result),
+            [
+                (
+                    {"interface": "ethernet1/1"},
+                    {
+                        "in_octets": 112633947248,
+                        "out_octets": 31443272030,
+                        "in_packets": 110950488,
+                        "out_packets": 62988198,
+                        "in_errors": 2,
+                        "in_discards": 3,
+                    },
+                ),
+                ({"interface": "ethernet1/2"}, {"in_octets": 0, "out_octets": 7528446}),
+            ],
+        )
 
     def test_line_protocol_escapes_tags_and_types(self):
         line = line_protocol("metric", {"hostname": "pa, one"}, {"count": 3, "ratio": 1.5, "state": "up"})
