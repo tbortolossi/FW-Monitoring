@@ -6,7 +6,7 @@ RUN echo "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] \
      > /etc/apt/sources.list.d/nonfree.list && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        snmp snmp-mibs-downloader nano && \
+        ca-certificates python3 snmp snmp-mibs-downloader nano && \
     download-mibs && \
     # 2) Allow Net-SNMP to load all discovered MIBs.
     sed -i 's/^mibs *:/# &/' /etc/snmp/snmp.conf && \
@@ -33,3 +33,6 @@ ENV MIBDIRS=/usr/share/snmp/mibs:\
 /usr/share/snmp/mibs/vendors/paloalto:\
 /usr/share/snmp/mibs/vendors/fortinet \
 MIBS=+ALL
+
+# Read-only PAN-OS XML API performance collector used by inputs.execd.
+COPY paloalto_api_collector.py /usr/local/bin/paloalto_api_collector.py

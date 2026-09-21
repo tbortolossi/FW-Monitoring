@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import datetime as _datetime
 import glob
+import json
 import os
 import re
 import shutil
@@ -53,6 +54,8 @@ print(f"Logging to {LOG_FILE}")
 
 MIB_DIR = PROJECT_DIR / "telegraf" / "mibs" / "paloalto"
 ENRICHED_FIREWALLS = PROJECT_DIR / ".firewalls.generated.yml"
+PALOALTO_API_INVENTORY = PROJECT_DIR / "telegraf" / "paloalto-api.json"
+PALOALTO_API_ENV = PROJECT_DIR / "telegraf" / "paloalto-api.env"
 SNMP_DISCOVERY = os.environ.get("SNMP_DISCOVERY", "true").lower()
 DEFAULT_PALO_MIB_VERSION = os.environ.get("PALO_MIB_VERSION", "11-2")
 SNMP_IMAGE = ""
@@ -194,6 +197,59 @@ def normalize_telegraf_snmp_priv(value):
     return normalize_snmp_priv(value).replace("-", "")
 
 
+def normalize_boolean(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"expected a boolean, got {value!r}")
+
+
+def validate_api_monitoring(firewall, label):
+    config = firewall.get("api_monitoring")
+    if config is None:
+        firewall["api_monitoring"] = {"enabled": False}
+        return
+    if not isinstance(config, dict):
+        raise SystemExit(f"ERROR: {label}: api_monitoring must be a mapping.")
+    try:
+        enabled = normalize_boolean(config.get("enabled"), default=True)
+        verify_tls = normalize_boolean(config.get("verify_tls"), default=True)
+    except ValueError as exc:
+        raise SystemExit(f"ERROR: {label}: invalid API monitoring boolean: {exc}") from exc
+    config["enabled"] = enabled
+    config["verify_tls"] = verify_tls
+    if not enabled:
+        return
+    if firewall.get("vendor") != "paloalto":
+        raise SystemExit(f"ERROR: {label}: API monitoring is supported only for Palo Alto firewalls.")
+    key_env = str(config.get("api_key_env") or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key_env):
+        raise SystemExit(f"ERROR: {label}: api_monitoring.api_key_env must name a valid environment variable.")
+    config["api_key_env"] = key_env
+    for key, default, minimum, maximum in (
+        ("port", 443, 1, 65535),
+        ("timeout", 15, 1, 120),
+        ("interval", 20, 10, 3600),
+        ("resource_interval", 60, 10, 3600),
+        ("counter_interval", 60, 10, 3600),
+        ("system_interval", 3600, 60, 86400),
+    ):
+        try:
+            config[key] = int(config.get(key, default))
+        except (TypeError, ValueError) as exc:
+            raise SystemExit(f"ERROR: {label}: api_monitoring.{key} must be an integer.") from exc
+        if not minimum <= config[key] <= maximum:
+            raise SystemExit(
+                f"ERROR: {label}: api_monitoring.{key} must be between {minimum} and {maximum}."
+            )
+
+
 def version_tuple(value):
     match = re.search(r"(\d+)\.(\d+)", str(value or ""))
     if not match:
@@ -235,6 +291,8 @@ def validate_inventory(firewalls):
             raise SystemExit(f"ERROR: entry #{index}: hostname is required.")
         if not firewall.get("host"):
             raise SystemExit(f"ERROR: {label}: host is required.")
+
+        validate_api_monitoring(firewall, label)
 
         try:
             firewall["snmp_version"] = int(firewall.get("snmp_version", 2))
@@ -585,9 +643,75 @@ def render_telegraf(firewalls, vendors):
         parts.append(render_template("inputs_paloalto.tmpl", context))
     if "fortinet" in vendors:
         parts.append(render_template("inputs_fortinet.tmpl", context))
+    if any(firewall.get("api_monitoring", {}).get("enabled") for firewall in firewalls):
+        parts.append(render_template("inputs_paloalto_api.tmpl", context))
 
     conf_out.write_text("\n".join(parts), encoding="utf-8")
     print("telegraf/telegraf.conf ready")
+
+
+def render_paloalto_api_inventory(firewalls):
+    api_firewalls = []
+    for firewall in firewalls:
+        config = firewall.get("api_monitoring", {})
+        if firewall.get("vendor") != "paloalto" or not config.get("enabled"):
+            continue
+        api_firewalls.append(
+            {
+                "hostname": firewall["hostname"],
+                "host": firewall["host"],
+                "api_key_env": config["api_key_env"],
+                "port": config["port"],
+                "verify_tls": config["verify_tls"],
+                "timeout": config["timeout"],
+                "interval": config["interval"],
+                "resource_interval": config["resource_interval"],
+                "counter_interval": config["counter_interval"],
+                "system_interval": config["system_interval"],
+            }
+        )
+    PALOALTO_API_INVENTORY.write_text(json.dumps(api_firewalls, indent=2) + "\n", encoding="utf-8")
+    try:
+        display_path = PALOALTO_API_INVENTORY.relative_to(PROJECT_DIR)
+    except ValueError:
+        display_path = PALOALTO_API_INVENTORY
+    print(f"{display_path} ready ({len(api_firewalls)} API firewall(s))")
+
+
+def load_dotenv(path):
+    values = {}
+    for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        values[name] = value
+    return values
+
+
+def render_paloalto_api_environment(firewalls, source=None):
+    source_path = Path(source or PROJECT_DIR / ".env")
+    source_values = load_dotenv(source_path)
+    required = sorted(
+        {
+            firewall["api_monitoring"]["api_key_env"]
+            for firewall in firewalls
+            if firewall.get("vendor") == "paloalto" and firewall.get("api_monitoring", {}).get("enabled")
+        }
+    )
+    missing = [name for name in required if not source_values.get(name)]
+    if missing:
+        raise SystemExit(
+            "ERROR: missing Palo Alto API key environment variable(s) in .env: " + ", ".join(missing)
+        )
+    content = "".join(f"{name}={source_values[name]}\n" for name in required)
+    PALOALTO_API_ENV.write_text(content, encoding="utf-8")
+    PALOALTO_API_ENV.chmod(0o600)
+    print(f"telegraf/paloalto-api.env ready ({len(required)} API key(s); values hidden)")
 
 
 def start_stack():
@@ -606,6 +730,7 @@ def main():
 
     firewalls = load_inventory(PROJECT_DIR / "firewalls.yml")
     validate_inventory(firewalls)
+    render_paloalto_api_environment(firewalls)
     vendors = detect_vendors(firewalls)
 
     print("Enriching inventory automatically...")
@@ -616,6 +741,7 @@ def main():
     save_inventory(firewalls, ENRICHED_FIREWALLS)
 
     prepare_paloalto_mibs(firewalls, vendors)
+    render_paloalto_api_inventory(firewalls)
     render_telegraf(firewalls, vendors)
     start_stack()
 

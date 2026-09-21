@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Optional Palo Alto XML API performance collector for sessions, management-plane CPU/RAM, per-core/dataplane CPU, system inventory, and a bounded set of global drop counters.
+- Interactive `paloalto_api_key.py` helper that stores API keys in `.env` and references them from `firewalls.yml`.
+- Provisioned `Palo Alto API Performance Monitoring` dashboard supporting compact and multi-blade firewalls.
+
+### Security
+
+- API keys are injected through environment variables and sent in the `X-PAN-KEY` header; they are not written to generated Telegraf configuration or logged.
+- TLS certificate verification is enabled by default and can only be disabled explicitly for lab use.
+
 ## 1.0.2 - 2026-05-12
 
 ### Added
