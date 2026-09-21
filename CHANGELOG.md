@@ -5,7 +5,8 @@
 ### Added
 
 - Optional Palo Alto XML API performance collector for sessions, management-plane CPU/RAM, per-core/dataplane CPU, system inventory, and a bounded set of global drop counters.
-- Interactive `paloalto_api_key.py` helper that stores API keys in `.env` and references them from `firewalls.yml`.
+- Interactive `paloalto_api_key.py` helper that stores API keys directly in the ignored local inventory by default, with `.env` references available through `--storage env`.
+- Direct `api_key` inventory configuration matching the existing SNMP credential workflow, while retaining `api_key_env` compatibility.
 - Provisioned `Palo Alto API Performance Monitoring` dashboard supporting compact and multi-blade firewalls.
 
 ### Security

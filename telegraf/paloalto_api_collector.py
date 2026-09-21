@@ -350,6 +350,19 @@ def load_config(path: Path) -> list[dict]:
     return data
 
 
+def load_environment_file(path: Path) -> None:
+    """Load the simple NAME=VALUE file generated for the Telegraf runtime."""
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise ValueError(f"invalid environment variable name in {path}: {name!r}")
+        os.environ.setdefault(name, value.strip())
+
+
 def run_once(configs: list[dict], categories: set[str] | None = None) -> int:
     selected = categories or {"sessions", "management", "dataplane", "counters", "system"}
     with ThreadPoolExecutor(max_workers=max(1, min(8, len(configs)))) as executor:
@@ -394,8 +407,11 @@ def run_daemon(configs: list[dict]) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("/etc/telegraf/paloalto-api.json"))
+    parser.add_argument("--env-file", type=Path, help="load API keys from a generated NAME=VALUE file")
     parser.add_argument("--once", action="store_true", help="collect every category once and exit")
     args = parser.parse_args(argv)
+    if args.env_file:
+        load_environment_file(args.env_file)
     configs = load_config(args.config)
     if not configs:
         return 0

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import datetime as _datetime
 import glob
+import hashlib
 import json
 import os
 import re
@@ -210,6 +211,13 @@ def normalize_boolean(value, default=False):
     raise ValueError(f"expected a boolean, got {value!r}")
 
 
+def api_runtime_environment_name(firewall):
+    label = re.sub(r"[^A-Za-z0-9]+", "_", str(firewall.get("hostname") or "firewall")).strip("_").upper()
+    identity = f"{firewall.get('hostname', '')}\0{firewall.get('host', '')}".encode("utf-8")
+    suffix = hashlib.sha256(identity).hexdigest()[:8].upper()
+    return f"PALOALTO_API_KEY_YAML_{label}_{suffix}"
+
+
 def validate_api_monitoring(firewall, label):
     config = firewall.get("api_monitoring")
     if config is None:
@@ -228,10 +236,22 @@ def validate_api_monitoring(firewall, label):
         return
     if firewall.get("vendor") != "paloalto":
         raise SystemExit(f"ERROR: {label}: API monitoring is supported only for Palo Alto firewalls.")
+    api_key = str(config.get("api_key") or "").strip()
     key_env = str(config.get("api_key_env") or "").strip()
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key_env):
+    if bool(api_key) == bool(key_env):
+        raise SystemExit(
+            f"ERROR: {label}: set exactly one of api_monitoring.api_key or api_monitoring.api_key_env."
+        )
+    if key_env and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key_env):
         raise SystemExit(f"ERROR: {label}: api_monitoring.api_key_env must name a valid environment variable.")
-    config["api_key_env"] = key_env
+    if api_key:
+        if "\n" in api_key or "\r" in api_key:
+            raise SystemExit(f"ERROR: {label}: api_monitoring.api_key must be a single line.")
+        config["api_key"] = api_key
+        config["runtime_api_key_env"] = api_runtime_environment_name(firewall)
+    else:
+        config["api_key_env"] = key_env
+        config["runtime_api_key_env"] = key_env
     for key, default, minimum, maximum in (
         ("port", 443, 1, 65535),
         ("timeout", 15, 1, 120),
@@ -660,7 +680,7 @@ def render_paloalto_api_inventory(firewalls):
             {
                 "hostname": firewall["hostname"],
                 "host": firewall["host"],
-                "api_key_env": config["api_key_env"],
+                "api_key_env": config["runtime_api_key_env"],
                 "port": config["port"],
                 "verify_tls": config["verify_tls"],
                 "timeout": config["timeout"],
@@ -696,22 +716,32 @@ def load_dotenv(path):
 def render_paloalto_api_environment(firewalls, source=None):
     source_path = Path(source or PROJECT_DIR / ".env")
     source_values = load_dotenv(source_path)
-    required = sorted(
-        {
-            firewall["api_monitoring"]["api_key_env"]
-            for firewall in firewalls
-            if firewall.get("vendor") == "paloalto" and firewall.get("api_monitoring", {}).get("enabled")
-        }
-    )
-    missing = [name for name in required if not source_values.get(name)]
+    runtime_values = {}
+    missing = []
+    for firewall in firewalls:
+        config = firewall.get("api_monitoring", {})
+        if firewall.get("vendor") != "paloalto" or not config.get("enabled"):
+            continue
+        runtime_name = config["runtime_api_key_env"]
+        if config.get("api_key"):
+            value = config["api_key"]
+        else:
+            value = source_values.get(config["api_key_env"])
+            if not value:
+                missing.append(config["api_key_env"])
+                continue
+        existing = runtime_values.get(runtime_name)
+        if existing is not None and existing != value:
+            raise SystemExit(f"ERROR: conflicting Palo Alto API keys resolve to {runtime_name}.")
+        runtime_values[runtime_name] = value
     if missing:
         raise SystemExit(
-            "ERROR: missing Palo Alto API key environment variable(s) in .env: " + ", ".join(missing)
+            "ERROR: missing Palo Alto API key environment variable(s) in .env: " + ", ".join(sorted(set(missing)))
         )
-    content = "".join(f"{name}={source_values[name]}\n" for name in required)
+    content = "".join(f"{name}={runtime_values[name]}\n" for name in sorted(runtime_values))
     PALOALTO_API_ENV.write_text(content, encoding="utf-8")
     PALOALTO_API_ENV.chmod(0o600)
-    print(f"telegraf/paloalto-api.env ready ({len(required)} API key(s); values hidden)")
+    print(f"telegraf/paloalto-api.env ready ({len(runtime_values)} API key(s); values hidden)")
 
 
 def start_stack():

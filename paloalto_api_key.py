@@ -74,18 +74,36 @@ def update_env(path: Path, name: str, value: str) -> None:
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 
-def update_inventory(path: Path, host: str, hostname: str | None, env_name: str, verify_tls: bool, port: int) -> str:
+def update_inventory(
+    path: Path,
+    host: str,
+    hostname: str | None,
+    verify_tls: bool,
+    port: int,
+    *,
+    api_key: str | None = None,
+    api_key_env: str | None = None,
+) -> str:
+    if bool(api_key) == bool(api_key_env):
+        raise ValueError("set exactly one of api_key or api_key_env")
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or []
     firewall = find_inventory_entry(data, host, hostname)
     backup = path.with_suffix(path.suffix + ".bak")
-    shutil.copy2(path, backup)
-    firewall["api_monitoring"] = {
+    if not backup.exists():
+        shutil.copy2(path, backup)
+        backup.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    api_config = {
         "enabled": True,
-        "api_key_env": env_name,
         "port": port,
         "verify_tls": verify_tls,
     }
+    if api_key:
+        api_config["api_key"] = api_key
+    else:
+        api_config["api_key_env"] = api_key_env
+    firewall["api_monitoring"] = api_config
     path.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=False), encoding="utf-8")
+    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
     return str(backup)
 
 
@@ -98,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=15)
     parser.add_argument("--inventory", type=Path, default=Path("firewalls.yml"))
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument(
+        "--storage",
+        choices=("yaml", "env"),
+        default="yaml",
+        help="store the API key directly in firewalls.yml (default) or reference it from .env",
+    )
     parser.add_argument("--insecure", action="store_true", help="disable TLS certificate verification")
     args = parser.parse_args(argv)
 
@@ -117,10 +141,28 @@ def main(argv: list[str] | None = None) -> int:
         key = generate_key(host, username, password, args.port, not args.insecure, args.timeout)
     except Exception as exc:
         raise SystemExit(f"ERROR: could not generate API key: {exc}") from exc
-    update_env(args.env_file, env_name, key)
-    backup = update_inventory(args.inventory, host, args.hostname, env_name, not args.insecure, args.port)
-    print(f"API key stored in {args.env_file} as {env_name} (mode 0600).")
-    print(f"API monitoring enabled in {args.inventory}; previous inventory saved as {backup}.")
+    if args.storage == "env":
+        update_env(args.env_file, env_name, key)
+        backup = update_inventory(
+            args.inventory,
+            host,
+            args.hostname,
+            not args.insecure,
+            args.port,
+            api_key_env=env_name,
+        )
+        print(f"API key stored in {args.env_file} as {env_name} (mode 0600).")
+    else:
+        backup = update_inventory(
+            args.inventory,
+            host,
+            args.hostname,
+            not args.insecure,
+            args.port,
+            api_key=key,
+        )
+        print(f"API key stored in the ignored local inventory {args.inventory}.")
+    print(f"API monitoring enabled in {args.inventory}; original inventory backup: {backup}.")
     print("The API key and password were not printed.")
     return 0
 

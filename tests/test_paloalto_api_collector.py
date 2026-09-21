@@ -1,11 +1,14 @@
 import os
+import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from unittest import mock
 
 from telegraf.paloalto_api_collector import (
     ApiError,
     line_protocol,
+    load_environment_file,
     parse_dataplane_resources,
     parse_global_counters,
     parse_management_resources,
@@ -97,6 +100,14 @@ class CollectorParsingTests(unittest.TestCase):
         request = urlopen.call_args.args[0]
         self.assertNotIn("super-secret", request.full_url)
         self.assertEqual(request.get_header("X-pan-key"), "super-secret")
+
+    def test_generated_environment_file_can_be_loaded_for_host_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "api.env"
+            path.write_text("# generated\nPALO_KEY=secret-value\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {}, clear=True):
+                load_environment_file(path)
+                self.assertEqual(os.environ["PALO_KEY"], "secret-value")
 
 
 if __name__ == "__main__":

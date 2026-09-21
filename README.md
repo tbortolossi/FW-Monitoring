@@ -148,7 +148,7 @@ Minimal Palo Alto SNMPv3:
   priv_password: CHANGE_ME_PRIV_PASSWORD
   api_monitoring:
     enabled: true
-    api_key_env: PALOALTO_API_KEY_PA_440
+    api_key: CHANGE_ME_PALO_ALTO_API_KEY
     verify_tls: true
     interval: 20
     resource_interval: 60
@@ -185,13 +185,9 @@ API monitoring is optional and Palo Alto-only. It complements SNMP; it does not 
 
 Create a dedicated PAN-OS administrator with a custom role that grants only XML API **Operational Requests** and **Show** access. Avoid using a full superuser account for ongoing collection.
 
-The helper obtains an API key using an interactive password prompt, stores the key in the ignored `.env` file with mode `0600`, and adds an `api_monitoring` block to the matching entry in `firewalls.yml`:
+### Choose Where to Store the API Key
 
-```bash
-.venv/bin/python paloalto_api_key.py --host 192.0.2.101 --hostname PA-440 --username fwmon-api
-```
-
-The password and generated key are never printed. Before rewriting the inventory, the helper creates `firewalls.yml.bak`. The resulting configuration contains only an environment-variable reference:
+The simplest option matches the existing SNMPv2c/SNMPv3 inventory: store the API key directly in the local `firewalls.yml`. That file is ignored by Git and already contains firewall credentials:
 
 ```yaml
 - hostname: PA-440
@@ -205,7 +201,7 @@ The password and generated key are never printed. Before rewriting the inventory
   priv_password: CHANGE_ME_PRIV_PASSWORD
   api_monitoring:
     enabled: true
-    api_key_env: PALOALTO_API_KEY_PA_440
+    api_key: CHANGE_ME_PALO_ALTO_API_KEY
     port: 443
     verify_tls: true
     interval: 20
@@ -214,11 +210,125 @@ The password and generated key are never printed. Before rewriting the inventory
     system_interval: 3600
 ```
 
+Never put a real key in `firewalls_example.yml`, a commit, a ticket, or a shared log.
+
+If local policy requires secrets to be separate from inventory, put the key in `.env`:
+
+```dotenv
+PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
+```
+
+Then reference its variable name in `firewalls.yml` instead of using `api_key`:
+
+```yaml
+  api_monitoring:
+    enabled: true
+    api_key_env: PALOALTO_API_KEY_PA_440
+    verify_tls: true
+```
+
+Set exactly one of `api_key` or `api_key_env` for each enabled firewall.
+
+### Generate and Store a Key
+
+The helper obtains an API key using an interactive password prompt and updates the matching inventory entry. By default it stores the key directly in the ignored local `firewalls.yml`, matching the SNMP credential workflow:
+
+```bash
+.venv/bin/python paloalto_api_key.py --host 192.0.2.101 --hostname PA-440 --username fwmon-api
+```
+
+Use environment-variable storage instead when required:
+
+```bash
+.venv/bin/python paloalto_api_key.py \
+  --host 192.0.2.101 \
+  --hostname PA-440 \
+  --username fwmon-api \
+  --storage env
+```
+
+The password and generated key are never printed. The helper sets the updated inventory and its backup to mode `0600`. Before its first rewrite, it preserves the original inventory as `firewalls.yml.bak`; later runs do not overwrite that initial backup.
+
 `verify_tls: true` is the secure default. Install a trusted firewall certificate or the issuing internal CA on the Docker host/container. For a temporary lab with a self-signed certificate, pass `--insecure`; the helper then writes `verify_tls: false` explicitly.
+
+### Docker and Non-Docker Variable Handling
+
+With the normal Docker Compose workflow, no manual `export` or `docker -e` command is required. `generate.py` resolves both direct `api_key` values and `.env` references, writes only the required keys to the mode-`0600` generated file `telegraf/paloalto-api.env`, and Docker Compose injects that file into Telegraf. Other `.env` secrets, such as Grafana and InfluxDB administrator passwords, are not passed to the Telegraf container.
+
+For a one-shot diagnostic from the Linux host rather than from Docker, first generate the runtime files, then let the collector load the protected environment file itself:
+
+```bash
+python3 telegraf/paloalto_api_collector.py \
+  --config telegraf/paloalto-api.json \
+  --env-file telegraf/paloalto-api.env \
+  --once
+```
+
+The supported full monitoring deployment remains Docker Compose; the host command is intended for connectivity and parser diagnostics.
+
+### Many Palo Alto Firewalls
+
+API monitoring is configured independently for every Palo Alto entry. Firewalls can be migrated gradually, and Fortinet entries are left unchanged:
+
+```yaml
+- hostname: PARIS-PA-01
+  host: 192.0.2.101
+  vendor: paloalto
+  snmp_version: 2
+  community: CHANGE_ME_PARIS_SNMP
+  api_monitoring:
+    enabled: true
+    api_key: CHANGE_ME_PARIS_API_KEY
+
+- hostname: LYON-PA-01
+  host: 192.0.2.102
+  vendor: paloalto
+  snmp_version: 3
+  username: fwmon
+  auth_protocol: sha256
+  auth_password: CHANGE_ME_LYON_AUTH
+  priv_protocol: aes256
+  priv_password: CHANGE_ME_LYON_PRIV
+  api_monitoring:
+    enabled: true
+    api_key_env: PALOALTO_API_KEY_LYON_PA_01
+
+- hostname: BORDEAUX-PA-01
+  host: 192.0.2.103
+  vendor: paloalto
+  snmp_version: 2
+  community: CHANGE_ME_BORDEAUX_SNMP
+  # No api_monitoring block: this firewall remains SNMP-only.
+```
+
+Use a unique `hostname` for every firewall and, when using `.env`, a clear unique variable name for every device. Run `paloalto_api_key.py` once per firewall that needs a generated key, or add existing keys manually. The collector serializes calls within one firewall and polls different firewalls in parallel, so adding a slow device does not block the others.
 
 The collector polls API categories sequentially for each firewall and only parallelizes between firewalls. Session polling cannot be configured below 10 seconds. Global counters are restricted to a small allowlist of high-value drop/failure counters to bound InfluxDB cardinality and management-plane load.
 
 The `Palo Alto API Performance Monitoring` dashboard works for both compact and multi-blade systems. Data-plane CPU is tagged by dataplane and core and includes a per-dataplane average, so PA-7000/PA-7500 results appear as additional series without a separate chassis dashboard. A complementary CPU panel shows the global MP/DP values and every processor exposed by `pan_hr_processors`. Interface throughput on this dashboard still comes from SNMP `ifHCInOctets` / `ifHCOutOctets`, because API throughput summaries can omit offloaded traffic.
+
+## Upgrade an Existing Installation
+
+Existing inventories remain compatible. If an entry has no `api_monitoring` block, API monitoring stays disabled and its SNMP behavior is unchanged. Configurations using the earlier `api_key_env` format also remain supported.
+
+Before updating the project, preserve the ignored local configuration:
+
+```bash
+cp firewalls.yml firewalls.yml.pre-api-upgrade
+cp .env .env.pre-api-upgrade
+```
+
+Then update the project files using your normal Git or archive workflow. Do not replace the local `firewalls.yml` with `firewalls_example.yml`.
+
+After the update:
+
+1. Add `api_monitoring` only to the Palo Alto firewalls you want to migrate.
+2. Generate missing keys with `paloalto_api_key.py`, or paste existing keys into the local inventory.
+3. Run `./generate.sh` rather than only `docker compose up -d`. The generator must recreate `telegraf/telegraf.conf`, `telegraf/paloalto-api.json`, and `telegraf/paloalto-api.env`, and rebuild the Telegraf image with Python support.
+4. Check `docker compose ps` and `docker compose logs --tail=100 telegraf`.
+5. Open `Palo Alto API Performance Monitoring` in Grafana and select each migrated hostname.
+
+To roll back API monitoring without affecting SNMP, set `api_monitoring.enabled: false` or remove the block, then rerun `./generate.sh`. Restore `firewalls.yml.pre-api-upgrade` only if the whole inventory migration must be undone.
 
 ## Palo Alto SNMP Setup
 

@@ -35,10 +35,24 @@ class GeneratorApiValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "between 10 and 3600"):
             generate.validate_inventory(firewalls)
 
-    def test_plaintext_key_is_not_accepted_in_inventory(self):
+    def test_direct_key_is_accepted_in_inventory(self):
         firewalls = inventory({"enabled": True, "api_key": "secret"})
-        with self.assertRaisesRegex(SystemExit, "api_key_env"):
-            generate.validate_inventory(firewalls)
+        generate.validate_inventory(firewalls)
+        api = firewalls[0]["api_monitoring"]
+        self.assertEqual(api["api_key"], "secret")
+        self.assertRegex(api["runtime_api_key_env"], r"^PALOALTO_API_KEY_YAML_PA_440_[A-F0-9]{8}$")
+
+    def test_exactly_one_key_source_is_required(self):
+        with self.assertRaisesRegex(SystemExit, "exactly one"):
+            generate.validate_inventory(inventory({"enabled": True}))
+        with self.assertRaisesRegex(SystemExit, "exactly one"):
+            generate.validate_inventory(
+                inventory({"enabled": True, "api_key": "secret", "api_key_env": "PALO_KEY"})
+            )
+
+    def test_direct_key_must_be_one_line(self):
+        with self.assertRaisesRegex(SystemExit, "single line"):
+            generate.validate_inventory(inventory({"enabled": True, "api_key": "first\nsecond"}))
 
     def test_api_monitoring_is_rejected_for_fortinet(self):
         firewalls = inventory({"enabled": True, "api_key_env": "FORTINET_KEY"})
@@ -47,14 +61,14 @@ class GeneratorApiValidationTests(unittest.TestCase):
             generate.validate_inventory(firewalls)
 
     def test_runtime_inventory_contains_reference_but_no_key(self):
-        firewalls = inventory({"enabled": True, "api_key_env": "PALOALTO_API_KEY_PA_440"})
+        firewalls = inventory({"enabled": True, "api_key": "direct-secret"})
         generate.validate_inventory(firewalls)
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "paloalto-api.json"
             with mock.patch.object(generate, "PALOALTO_API_INVENTORY", destination):
                 generate.render_paloalto_api_inventory(firewalls)
             data = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(data[0]["api_key_env"], "PALOALTO_API_KEY_PA_440")
+        self.assertRegex(data[0]["api_key_env"], r"^PALOALTO_API_KEY_YAML_PA_440_[A-F0-9]{8}$")
         self.assertNotIn("api_key", data[0])
 
     def test_execd_template_is_rendered_when_api_enabled(self):
@@ -80,6 +94,21 @@ class GeneratorApiValidationTests(unittest.TestCase):
             mode = stat.S_IMODE(destination.stat().st_mode)
         self.assertEqual(content, "PALOALTO_API_KEY_PA_440=api-secret\n")
         self.assertEqual(mode, 0o600)
+
+    def test_direct_key_is_copied_to_protected_runtime_environment(self):
+        firewalls = inventory({"enabled": True, "api_key": "direct-secret"})
+        generate.validate_inventory(firewalls)
+        runtime_name = firewalls[0]["api_monitoring"]["runtime_api_key_env"]
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            source = directory / ".env"
+            destination = directory / "paloalto-api.env"
+            source.write_text("GRAFANA_ADMIN_PASSWORD=unrelated-secret\n", encoding="utf-8")
+            with mock.patch.object(generate, "PALOALTO_API_ENV", destination):
+                generate.render_paloalto_api_environment(firewalls, source=source)
+            content = destination.read_text(encoding="utf-8")
+        self.assertEqual(content, f"{runtime_name}=direct-secret\n")
+        self.assertNotIn("GRAFANA_ADMIN_PASSWORD", content)
 
 
 if __name__ == "__main__":

@@ -20,12 +20,14 @@
   auth_password: CHANGE_ME_AUTH
   priv_protocol: aes256
   priv_password: CHANGE_ME_PRIV
-  # Optional PAN-OS XML API performance monitoring. Store the actual key in
-  # .env; only its environment-variable name belongs in this YAML file. Run
-  # paloalto_api_key.py to generate the key and switch enabled to true.
+  # Optional PAN-OS XML API performance monitoring. firewalls.yml is ignored
+  # by Git, like the SNMP credentials. Run paloalto_api_key.py to generate the
+  # key and switch enabled to true.
   api_monitoring:
     enabled: false
-    api_key_env: PALOALTO_API_KEY_PA_440
+    api_key: CHANGE_ME_PALO_ALTO_API_KEY
+    # Alternative: store the key in .env and use this instead of api_key:
+    # api_key_env: PALOALTO_API_KEY_PA_440
     verify_tls: true
     interval: 20
     resource_interval: 60
