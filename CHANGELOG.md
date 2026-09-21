@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.1.0 - 2026-09-22
+
 ### Added
 
 - Optional Palo Alto XML API performance collector for sessions, management-plane CPU/RAM, per-core/dataplane CPU, hardware interface counters, system inventory, and a bounded set of global drop counters.
@@ -10,6 +12,13 @@
 - Provisioned `Palo Alto API Performance Monitoring` dashboard supporting compact and multi-blade firewalls.
 - API-only throughput calculated from cumulative PAN-OS hardware interface byte counters instead of SNMP data.
 - Optional per-firewall API host override when SNMP and HTTPS reach the same Palo Alto device through different addresses.
+- Collapsible API dashboard sections matching the standard dashboard layout, including per-interface throughput/status and one repeated CPU/resource row per dataplane.
+- API-derived HA state, storage usage, interface metadata, environmental sensors, uptime, and per-dataplane resource pressure.
+
+### Fixed
+
+- Platform and PAN-OS version now render reliably as dashboard text values instead of empty stat panels.
+- Dataplane CPU parsing no longer lets the maximum-load table overwrite the average-load series.
 
 ### Security
 
