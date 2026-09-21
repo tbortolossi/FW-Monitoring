@@ -23,6 +23,13 @@ The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB 
   - `Palo Alto API Performance Monitoring`
 - Best-effort SNMP discovery before Telegraf config generation
 
+## Common Tasks
+
+- [Install or regenerate the stack](#quick-start)
+- [Open Grafana and view a dashboard](#open-grafana-and-view-dashboards)
+- [Upgrade an existing installation](#upgrade-an-existing-installation)
+- [Configure Palo Alto XML API monitoring](#palo-alto-xml-api-setup)
+
 ## Requirements
 
 - Linux host with Docker and Docker Compose v2
@@ -84,13 +91,50 @@ The Python generator discovers the firewalls over SNMP, renders `telegraf/telegr
 
 The Compose services use `restart: unless-stopped`, so they come back automatically after a host reboot as long as Docker starts on boot.
 
-6. Open Grafana:
+6. [Open Grafana and select a dashboard](#open-grafana-and-view-dashboards).
 
-```text
-http://<docker-host>:3000
+## Open Grafana and View Dashboards
+
+First confirm that the three services are running:
+
+```bash
+docker compose ps
 ```
 
-Use the Grafana admin username/password from `.env`.
+Open one of these addresses in a browser:
+
+```text
+# Browser running on the Docker host
+http://localhost:3000
+
+# Browser running on another machine
+http://<docker-host-ip>:3000
+```
+
+Run `hostname -I` on the Docker host if you do not know its IP address. Use an address reachable from the browser's network.
+
+Sign in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` from the local `.env` file. These values initialize the administrator account on the first start. Changing them later does not automatically change the password already stored in `grafana-data/`.
+
+In Grafana:
+
+1. Open **Dashboards**.
+2. Select the required dashboard:
+   - **Palo Alto API Performance Monitoring** for the API-only Palo Alto view.
+   - **Palo Alto Firewall Monitoring** for the standard Palo Alto SNMP view.
+   - **Palo Alto Chassis Monitoring** for chassis-specific SNMP metrics.
+   - **Fortinet Firewall Monitoring** for Fortinet devices.
+3. Use the **hostname** selector at the top of the dashboard when several firewalls are configured.
+4. Select a time range that includes recent data. New API metrics may need one or two polling intervals before every panel is populated.
+
+If Grafana opens locally but not from another computer, allow inbound TCP port `3000` from the trusted administration network on the Docker host firewall. Do not expose Grafana directly to the public internet; use a restricted network or a TLS reverse proxy for remote access.
+
+If the page opens but a dashboard has no data, check:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 telegraf
+tail -100 logs/telegraf/telegraf.log
+```
 
 ## Python Generator
 
@@ -311,24 +355,66 @@ The `Palo Alto API Performance Monitoring` dashboard works for both compact and 
 
 Existing inventories remain compatible. If an entry has no `api_monitoring` block, API monitoring stays disabled and its SNMP behavior is unchanged. Configurations using the earlier `api_key_env` format also remain supported.
 
-Before updating the project, preserve the ignored local configuration:
+### 1. Back Up the Local Configuration
+
+Run these commands from the existing project directory before updating it:
 
 ```bash
-cp firewalls.yml firewalls.yml.pre-api-upgrade
-cp .env .env.pre-api-upgrade
+install -d -m 700 ../fw-monitoring-backup-YYYYMMDD
+cp -a firewalls.yml .env ../fw-monitoring-backup-YYYYMMDD/
 ```
 
-Then update the project files using your normal Git or archive workflow. Do not replace the local `firewalls.yml` with `firewalls_example.yml`.
+Replace `YYYYMMDD` with the upgrade date. Keeping the backup outside the repository prevents configuration copies containing secrets from appearing as untracked project files.
 
-After the update:
+For an important production installation, stop the stack and also copy `influxdb-data/` and `grafana-data/` into that protected backup directory before restarting it. They contain the monitoring history and Grafana state and are not regenerated from the YAML inventory. Keep all backups private because configuration and data directories can contain credentials or operational information.
+
+### 2. Update the Project Files
+
+For a Git checkout:
+
+```bash
+git status --short
+git pull --ff-only
+```
+
+Review any local tracked-file changes before pulling. The normal local configuration files, `.env` and `firewalls.yml`, are ignored by Git and must remain in place. Do not replace `firewalls.yml` with `firewalls_example.yml`.
+
+For an archive-based installation, extract the new project release over a copy of the existing directory and restore the saved `.env` and `firewalls.yml` before running the generator. Preserve `influxdb-data/` and `grafana-data/` if the installation is moved to a new directory.
+
+### 3. Regenerate and Restart the Stack
+
+Always run the generator after an upgrade:
+
+```bash
+./generate.sh
+```
+
+Do not use only `docker compose up -d`. The generator validates the existing inventory, recreates the Telegraf and API runtime files, downloads any required MIBs, rebuilds the Telegraf image, and starts or refreshes the stack. Existing InfluxDB history and Grafana state remain in their persistent data directories.
+
+### 4. Verify the Upgrade
+
+```bash
+docker compose ps
+docker compose logs --tail=100 telegraf
+```
+
+Then open `http://<docker-host-ip>:3000`, open the relevant dashboard, and verify each configured hostname.
+
+### 5. Enable API Monitoring Gradually
+
+The upgrade does not automatically enable API monitoring. Migrate Palo Alto firewalls one at a time:
 
 1. Add `api_monitoring` only to the Palo Alto firewalls you want to migrate.
 2. Generate missing keys with `paloalto_api_key.py`, or paste existing keys into the local inventory.
-3. Run `./generate.sh` rather than only `docker compose up -d`. The generator must recreate `telegraf/telegraf.conf`, `telegraf/paloalto-api.json`, and `telegraf/paloalto-api.env`, and rebuild the Telegraf image with Python support.
+3. Run `./generate.sh` again to recreate `telegraf/telegraf.conf`, `telegraf/paloalto-api.json`, and `telegraf/paloalto-api.env`.
 4. Check `docker compose ps` and `docker compose logs --tail=100 telegraf`.
 5. Open `Palo Alto API Performance Monitoring` in Grafana and select each migrated hostname.
 
-To roll back API monitoring without affecting SNMP, set `api_monitoring.enabled: false` or remove the block, then rerun `./generate.sh`. Restore `firewalls.yml.pre-api-upgrade` only if the whole inventory migration must be undone.
+### Rollback
+
+To roll back only API monitoring without affecting SNMP, set `api_monitoring.enabled: false` or remove the block, then rerun `./generate.sh`.
+
+To roll back the local configuration, copy `.env` and `firewalls.yml` back from the protected backup directory, then rerun the generator. If the project code itself must also be rolled back, restore the previous release or Git tag first. Do not delete `influxdb-data/` or `grafana-data/` during a routine rollback.
 
 ## Palo Alto SNMP Setup
 
