@@ -68,6 +68,25 @@ class ApiKeySetupTests(unittest.TestCase):
             update_inventory(path, "192.0.2.10", None, True, 443, api_key="new-secret")
             self.assertEqual(Path(backup).read_text(encoding="utf-8"), original_backup)
 
+    def test_update_inventory_stores_distinct_api_host(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "firewalls.yml"
+            path.write_text(
+                "- hostname: PA-440\n  host: 192.0.2.10\n  vendor: paloalto\n",
+                encoding="utf-8",
+            )
+            update_inventory(
+                path,
+                "api-pa.example.test",
+                "PA-440",
+                True,
+                443,
+                api_key="direct-secret",
+            )
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            self.assertEqual(data[0]["host"], "192.0.2.10")
+            self.assertEqual(data[0]["api_monitoring"]["host"], "api-pa.example.test")
+
 
 if __name__ == "__main__":
     unittest.main()

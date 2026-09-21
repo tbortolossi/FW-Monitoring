@@ -29,6 +29,27 @@ class GeneratorApiValidationTests(unittest.TestCase):
         self.assertEqual(api["interval"], 20)
         self.assertEqual(api["resource_interval"], 60)
         self.assertTrue(api["verify_tls"])
+        self.assertEqual(api["host"], "192.0.2.10")
+
+    def test_api_host_can_differ_from_snmp_host(self):
+        firewalls = inventory(
+            {"enabled": True, "api_key_env": "PALOALTO_API_KEY_PA_440", "host": "api-pa.example.test"}
+        )
+        generate.validate_inventory(firewalls)
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "paloalto-api.json"
+            with mock.patch.object(generate, "PALOALTO_API_INVENTORY", destination):
+                generate.render_paloalto_api_inventory(firewalls)
+            data = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(data[0]["host"], "api-pa.example.test")
+        self.assertEqual(firewalls[0]["host"], "192.0.2.10")
+
+    def test_api_host_rejects_a_url(self):
+        firewalls = inventory(
+            {"enabled": True, "api_key_env": "PALOALTO_API_KEY_PA_440", "host": "https://pa.example.test/api"}
+        )
+        with self.assertRaisesRegex(SystemExit, "bare IP address"):
+            generate.validate_inventory(firewalls)
 
     def test_interval_below_ten_seconds_is_rejected(self):
         firewalls = inventory({"enabled": True, "api_key_env": "PALOALTO_API_KEY_PA_440", "interval": 5})

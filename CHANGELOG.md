@@ -9,6 +9,7 @@
 - Direct `api_key` inventory configuration matching the existing SNMP credential workflow, while retaining `api_key_env` compatibility.
 - Provisioned `Palo Alto API Performance Monitoring` dashboard supporting compact and multi-blade firewalls.
 - API-only throughput calculated from cumulative PAN-OS hardware interface byte counters instead of SNMP data.
+- Optional per-firewall API host override when SNMP and HTTPS reach the same Palo Alto device through different addresses.
 
 ### Security
 

@@ -97,6 +97,8 @@ def update_inventory(
         "port": port,
         "verify_tls": verify_tls,
     }
+    if str(firewall.get("host")) != host:
+        api_config["host"] = host
     if api_key:
         api_config["api_key"] = api_key
     else:
@@ -109,7 +111,7 @@ def update_inventory(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host")
+    parser.add_argument("--host", help="PAN-OS API IP or hostname; may differ from the inventory SNMP host")
     parser.add_argument("--hostname", help="inventory hostname; defaults to the host value")
     parser.add_argument("--username")
     parser.add_argument("--port", type=int, default=443)

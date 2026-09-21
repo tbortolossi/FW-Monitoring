@@ -192,6 +192,8 @@ Minimal Palo Alto SNMPv3:
   priv_password: CHANGE_ME_PRIV_PASSWORD
   api_monitoring:
     enabled: true
+    # Optional: set this only when API and SNMP use different addresses.
+    # host: 192.0.2.201
     api_key: CHANGE_ME_PALO_ALTO_API_KEY
     verify_tls: true
     interval: 20
@@ -273,9 +275,23 @@ Then reference its variable name in `firewalls.yml` instead of using `api_key`:
 
 Set exactly one of `api_key` or `api_key_env` for each enabled firewall.
 
+By default, API polling uses the firewall-level `host`, which is also used for SNMP. If the same firewall is reached through different addresses for SNMP and HTTPS, keep the SNMP address at the top level and set the API address inside `api_monitoring`:
+
+```yaml
+- hostname: PA-440
+  host: 192.0.2.101       # SNMP address
+  vendor: paloalto
+  snmp_version: 2
+  community: CHANGE_ME_COMMUNITY
+  api_monitoring:
+    enabled: true
+    host: 192.0.2.201     # PAN-OS XML API address
+    api_key: CHANGE_ME_PALO_ALTO_API_KEY
+```
+
 ### Generate and Store a Key
 
-The helper obtains an API key using an interactive password prompt and updates the matching inventory entry. By default it stores the key directly in the ignored local `firewalls.yml`, matching the SNMP credential workflow:
+The helper obtains an API key using an interactive password prompt and updates the matching inventory entry. By default it stores the key directly in the ignored local `firewalls.yml`, matching the SNMP credential workflow. `--host` is the API address; `--hostname` lets the helper find the inventory entry when its SNMP address is different:
 
 ```bash
 .venv/bin/python paloalto_api_key.py --host 192.0.2.101 --hostname PA-440 --username fwmon-api

@@ -236,6 +236,12 @@ def validate_api_monitoring(firewall, label):
         return
     if firewall.get("vendor") != "paloalto":
         raise SystemExit(f"ERROR: {label}: API monitoring is supported only for Palo Alto firewalls.")
+    api_host = str(config.get("host") or firewall["host"]).strip()
+    if not api_host or re.search(r"[\s/?#]", api_host):
+        raise SystemExit(
+            f"ERROR: {label}: api_monitoring.host must be a bare IP address or DNS name."
+        )
+    config["host"] = api_host
     api_key = str(config.get("api_key") or "").strip()
     key_env = str(config.get("api_key_env") or "").strip()
     if bool(api_key) == bool(key_env):
@@ -679,7 +685,7 @@ def render_paloalto_api_inventory(firewalls):
         api_firewalls.append(
             {
                 "hostname": firewall["hostname"],
-                "host": firewall["host"],
+                "host": config["host"],
                 "api_key_env": config["runtime_api_key_env"],
                 "port": config["port"],
                 "verify_tls": config["verify_tls"],
