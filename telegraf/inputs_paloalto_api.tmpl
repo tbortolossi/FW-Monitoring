@@ -1,0 +1,7 @@
+# Palo Alto XML API collector. One long-running process schedules categories at
+# different intervals and serializes API calls for each firewall.
+[[inputs.execd]]
+  command = ["python3", "/usr/local/bin/paloalto_api_collector.py", "--config", "/etc/telegraf/paloalto-api.json"]
+  signal = "none"
+  data_format = "influx"
+  tagexclude = ["host"]

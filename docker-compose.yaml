@@ -28,8 +28,12 @@ services:
       INFLUX_TOKEN: ${INFLUX_TOKEN:?Set INFLUX_TOKEN in .env}
       INFLUX_ORG: ${INFLUX_ORG:-netops}
       INFLUX_BUCKET: ${INFLUX_BUCKET:-firewalls}
+    env_file:
+      - path: ./telegraf/paloalto-api.env
+        required: false
     volumes:
       - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - ./telegraf/paloalto-api.json:/etc/telegraf/paloalto-api.json:ro
       - ./telegraf/mibs/paloalto:/usr/share/snmp/mibs/vendors/paloalto:ro
       - ./logs/telegraf:/var/log/telegraf
 

@@ -1,6 +1,6 @@
 # Firewall Monitoring Starter
 
-SNMP-only Palo Alto and Fortinet firewall monitoring stack with Docker Compose, Telegraf, InfluxDB, and Grafana.
+Palo Alto and Fortinet firewall monitoring stack with Docker Compose, Telegraf, InfluxDB, and Grafana. SNMP is the baseline; Palo Alto devices can optionally add read-only PAN-OS XML API performance polling.
 
 ![FW-Monitoring dashboard](docs/assets/FW-Monitoring.png)
 
@@ -8,24 +8,34 @@ Docker Compose stack for quick Palo Alto and Fortinet firewall monitoring with T
 
 The goal is simple operational visibility: CPU, memory, sessions, CPS, disk where useful, interface status, errors/discards, and throughput. It is useful when you need a quick factual view of firewall load without deploying a full NMS.
 
-For both vendors, throughput is calculated from IF-MIB interface counters (`ifHCInOctets` and `ifHCOutOctets`). This is intentional: dataplane, NPU, or feature counters can miss traffic that is offloaded or handled outside that counter path.
+The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB interface counters (`ifHCInOctets` and `ifHCOutOctets`). The optional API-only Palo Alto dashboard instead uses the hardware interface byte counters returned by `show counter interface all`. Neither path uses session or feature throughput summaries, which can miss offloaded traffic.
 
 ## What You Get
 
 - InfluxDB 2.x for time series storage
 - Telegraf SNMP polling generated from `firewalls.yml`
+- Optional Palo Alto XML API polling for sessions, management-plane resources, per-core/dataplane CPU, interface state and throughput, HA, storage, environmental sensors, and selected drop counters
 - Grafana with provisioned InfluxDB datasource
-- Three monitoring dashboards:
+- Four monitoring dashboards:
   - `Palo Alto Firewall Monitoring`
   - `Palo Alto Chassis Monitoring`
   - `Fortinet Firewall Monitoring`
+  - `Palo Alto API Performance Monitoring`
 - Best-effort SNMP discovery before Telegraf config generation
+
+## Common Tasks
+
+- [Install or regenerate the stack](#quick-start)
+- [Open Grafana and view a dashboard](#open-grafana-and-view-dashboards)
+- [Upgrade an existing installation](#upgrade-an-existing-installation)
+- [Configure Palo Alto XML API monitoring](#palo-alto-xml-api-setup)
 
 ## Requirements
 
 - Linux host with Docker and Docker Compose v2
 - Python 3 with `venv` and `pip`
 - UDP/161 reachable from the Docker host to each firewall
+- For optional Palo Alto API monitoring, TCP/443 (or the configured API port) reachable from the Telegraf container
 - SNMP enabled on the firewall management interface or the interface you poll
 - A local `.env` file based on `.env.example`
 - A local `firewalls.yml` file based on `firewalls_example.yml`
@@ -49,7 +59,7 @@ Change every `CHANGE_ME...` value.
 cp firewalls_example.yml firewalls.yml
 ```
 
-3. Configure SNMP on the firewalls. Examples are below.
+3. Configure SNMP on the firewalls. Examples are below. For Palo Alto API monitoring, also follow the XML API setup section.
 
 4. Edit `firewalls.yml`:
 
@@ -81,13 +91,50 @@ The Python generator discovers the firewalls over SNMP, renders `telegraf/telegr
 
 The Compose services use `restart: unless-stopped`, so they come back automatically after a host reboot as long as Docker starts on boot.
 
-6. Open Grafana:
+6. [Open Grafana and select a dashboard](#open-grafana-and-view-dashboards).
 
-```text
-http://<docker-host>:3000
+## Open Grafana and View Dashboards
+
+First confirm that the three services are running:
+
+```bash
+docker compose ps
 ```
 
-Use the Grafana admin username/password from `.env`.
+Open one of these addresses in a browser:
+
+```text
+# Browser running on the Docker host
+http://localhost:3000
+
+# Browser running on another machine
+http://<docker-host-ip>:3000
+```
+
+Run `hostname -I` on the Docker host if you do not know its IP address. Use an address reachable from the browser's network.
+
+Sign in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` from the local `.env` file. These values initialize the administrator account on the first start. Changing them later does not automatically change the password already stored in `grafana-data/`.
+
+In Grafana:
+
+1. Open **Dashboards**.
+2. Select the required dashboard:
+   - **Palo Alto API Performance Monitoring** for the API-only Palo Alto view.
+   - **Palo Alto Firewall Monitoring** for the standard Palo Alto SNMP view.
+   - **Palo Alto Chassis Monitoring** for chassis-specific SNMP metrics.
+   - **Fortinet Firewall Monitoring** for Fortinet devices.
+3. Use the **hostname** selector at the top of the dashboard when several firewalls are configured.
+4. Select a time range that includes recent data. New API metrics may need one or two polling intervals before every panel is populated.
+
+If Grafana opens locally but not from another computer, allow inbound TCP port `3000` from the trusted administration network on the Docker host firewall. Do not expose Grafana directly to the public internet; use a restricted network or a TLS reverse proxy for remote access.
+
+If the page opens but a dashboard has no data, check:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 telegraf
+tail -100 logs/telegraf/telegraf.log
+```
 
 ## Python Generator
 
@@ -102,6 +149,8 @@ On each run, the generator:
 - loads and validates `firewalls.yml`
 - performs best-effort SNMP discovery for version, model, serial, VSYS/VDOM, and chassis-related flags
 - writes `.firewalls.generated.yml`
+- writes the API-only runtime inventory to `telegraf/paloalto-api.json` (without API keys)
+- writes only the required Palo Alto keys to the protected `telegraf/paloalto-api.env` runtime file, so Telegraf does not receive unrelated `.env` secrets
 - downloads Palo Alto MIB files when needed
 - renders `telegraf/telegraf.conf`
 - builds the Telegraf image
@@ -141,6 +190,15 @@ Minimal Palo Alto SNMPv3:
   auth_password: CHANGE_ME_AUTH_PASSWORD
   priv_protocol: aes256
   priv_password: CHANGE_ME_PRIV_PASSWORD
+  api_monitoring:
+    enabled: true
+    # Optional: set this only when API and SNMP use different addresses.
+    # host: 192.0.2.201
+    api_key: CHANGE_ME_PALO_ALTO_API_KEY
+    verify_tls: true
+    interval: 20
+    resource_interval: 60
+    counter_interval: 60
 ```
 
 Minimal Fortinet SNMPv3:
@@ -166,6 +224,217 @@ SNMPv2c is also supported:
   snmp_version: 2
   community: CHANGE_ME_COMMUNITY
 ```
+
+## Palo Alto XML API Setup
+
+API monitoring is optional and Palo Alto-only. Its dedicated dashboard is API-only, including interface throughput; the existing SNMP dashboards remain unchanged.
+
+Create a dedicated PAN-OS administrator with a custom role that grants only XML API **Operational Requests** and **Show** access. Avoid using a full superuser account for ongoing collection.
+
+### Choose Where to Store the API Key
+
+The simplest option matches the existing SNMPv2c/SNMPv3 inventory: store the API key directly in the local `firewalls.yml`. That file is ignored by Git and already contains firewall credentials:
+
+```yaml
+- hostname: PA-440
+  host: 192.0.2.101
+  vendor: paloalto
+  snmp_version: 3
+  username: fwmon
+  auth_protocol: sha256
+  auth_password: CHANGE_ME_AUTH_PASSWORD
+  priv_protocol: aes256
+  priv_password: CHANGE_ME_PRIV_PASSWORD
+  api_monitoring:
+    enabled: true
+    api_key: CHANGE_ME_PALO_ALTO_API_KEY
+    port: 443
+    verify_tls: true
+    interval: 20
+    resource_interval: 60
+    counter_interval: 60
+    system_interval: 3600
+```
+
+Never put a real key in `firewalls_example.yml`, a commit, a ticket, or a shared log.
+
+If local policy requires secrets to be separate from inventory, put the key in `.env`:
+
+```dotenv
+PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
+```
+
+Then reference its variable name in `firewalls.yml` instead of using `api_key`:
+
+```yaml
+  api_monitoring:
+    enabled: true
+    api_key_env: PALOALTO_API_KEY_PA_440
+    verify_tls: true
+```
+
+Set exactly one of `api_key` or `api_key_env` for each enabled firewall.
+
+By default, API polling uses the firewall-level `host`, which is also used for SNMP. If the same firewall is reached through different addresses for SNMP and HTTPS, keep the SNMP address at the top level and set the API address inside `api_monitoring`:
+
+```yaml
+- hostname: PA-440
+  host: 192.0.2.101       # SNMP address
+  vendor: paloalto
+  snmp_version: 2
+  community: CHANGE_ME_COMMUNITY
+  api_monitoring:
+    enabled: true
+    host: 192.0.2.201     # PAN-OS XML API address
+    api_key: CHANGE_ME_PALO_ALTO_API_KEY
+```
+
+### Generate and Store a Key
+
+The helper obtains an API key using an interactive password prompt and updates the matching inventory entry. By default it stores the key directly in the ignored local `firewalls.yml`, matching the SNMP credential workflow. `--host` is the API address; `--hostname` lets the helper find the inventory entry when its SNMP address is different:
+
+```bash
+.venv/bin/python paloalto_api_key.py --host 192.0.2.101 --hostname PA-440 --username fwmon-api
+```
+
+Use environment-variable storage instead when required:
+
+```bash
+.venv/bin/python paloalto_api_key.py \
+  --host 192.0.2.101 \
+  --hostname PA-440 \
+  --username fwmon-api \
+  --storage env
+```
+
+The password and generated key are never printed. The helper sets the updated inventory and its backup to mode `0600`. Before its first rewrite, it preserves the original inventory as `firewalls.yml.bak`; later runs do not overwrite that initial backup.
+
+`verify_tls: true` is the secure default. Install a trusted firewall certificate or the issuing internal CA on the Docker host/container. For a temporary lab with a self-signed certificate, pass `--insecure`; the helper then writes `verify_tls: false` explicitly.
+
+### Docker and Non-Docker Variable Handling
+
+With the normal Docker Compose workflow, no manual `export` or `docker -e` command is required. `generate.py` resolves both direct `api_key` values and `.env` references, writes only the required keys to the mode-`0600` generated file `telegraf/paloalto-api.env`, and Docker Compose injects that file into Telegraf. Other `.env` secrets, such as Grafana and InfluxDB administrator passwords, are not passed to the Telegraf container.
+
+For a one-shot diagnostic from the Linux host rather than from Docker, first generate the runtime files, then let the collector load the protected environment file itself:
+
+```bash
+python3 telegraf/paloalto_api_collector.py \
+  --config telegraf/paloalto-api.json \
+  --env-file telegraf/paloalto-api.env \
+  --once
+```
+
+The supported full monitoring deployment remains Docker Compose; the host command is intended for connectivity and parser diagnostics.
+
+### Many Palo Alto Firewalls
+
+API monitoring is configured independently for every Palo Alto entry. Firewalls can be migrated gradually, and Fortinet entries are left unchanged:
+
+```yaml
+- hostname: PARIS-PA-01
+  host: 192.0.2.101
+  vendor: paloalto
+  snmp_version: 2
+  community: CHANGE_ME_PARIS_SNMP
+  api_monitoring:
+    enabled: true
+    api_key: CHANGE_ME_PARIS_API_KEY
+
+- hostname: LYON-PA-01
+  host: 192.0.2.102
+  vendor: paloalto
+  snmp_version: 3
+  username: fwmon
+  auth_protocol: sha256
+  auth_password: CHANGE_ME_LYON_AUTH
+  priv_protocol: aes256
+  priv_password: CHANGE_ME_LYON_PRIV
+  api_monitoring:
+    enabled: true
+    api_key_env: PALOALTO_API_KEY_LYON_PA_01
+
+- hostname: BORDEAUX-PA-01
+  host: 192.0.2.103
+  vendor: paloalto
+  snmp_version: 2
+  community: CHANGE_ME_BORDEAUX_SNMP
+  # No api_monitoring block: this firewall remains SNMP-only.
+```
+
+Use a unique `hostname` for every firewall and, when using `.env`, a clear unique variable name for every device. Run `paloalto_api_key.py` once per firewall that needs a generated key, or add existing keys manually. The collector serializes calls within one firewall and polls different firewalls in parallel, so adding a slow device does not block the others.
+
+The collector polls API categories sequentially for each firewall and only parallelizes between firewalls. Session and hardware interface counters use `interval`, which cannot be configured below 10 seconds. Global counters are restricted to a small allowlist of high-value drop/failure counters to bound InfluxDB cardinality and management-plane load.
+
+The `Palo Alto API Performance Monitoring` dashboard works for both compact and multi-blade systems and reads only PAN-OS XML API measurements. Its main view mirrors the standard dashboard with platform, PAN-OS version, uptime, MP/DP CPU, RAM, sessions, CPS, session utilization, and global throughput. Additional details are grouped into collapsible sections for HA, interfaces, errors/discards, session protocols, drop counters, MP load/storage, and environmental sensors.
+
+Data-plane CPU is tagged by dataplane and core. Grafana creates one collapsible row per dataplane, containing its individual core curves and API resource pressure (sessions, packet buffers, packet descriptors, and software tags when exposed). This supports compact systems and multi-DP chassis such as PA-5500/PA-7000/PA-7500 without requiring a separate API chassis dashboard.
+
+The interface section includes API-derived throughput and packet-rate curves per interface plus current link state, speed, duplex, mode, zone, VSYS, and forwarding instance. Throughput is calculated from deltas of the hardware `ibytes` / `obytes` counters returned by `show counter interface all`; it does not use SNMP or the less reliable session throughput summary.
+
+## Upgrade an Existing Installation
+
+Existing inventories remain compatible. If an entry has no `api_monitoring` block, API monitoring stays disabled and its SNMP behavior is unchanged. Configurations using the earlier `api_key_env` format also remain supported.
+
+### 1. Back Up the Local Configuration
+
+Run these commands from the existing project directory before updating it:
+
+```bash
+install -d -m 700 ../fw-monitoring-backup-YYYYMMDD
+cp -a firewalls.yml .env ../fw-monitoring-backup-YYYYMMDD/
+```
+
+Replace `YYYYMMDD` with the upgrade date. Keeping the backup outside the repository prevents configuration copies containing secrets from appearing as untracked project files.
+
+For an important production installation, stop the stack and also copy `influxdb-data/` and `grafana-data/` into that protected backup directory before restarting it. They contain the monitoring history and Grafana state and are not regenerated from the YAML inventory. Keep all backups private because configuration and data directories can contain credentials or operational information.
+
+### 2. Update the Project Files
+
+For a Git checkout:
+
+```bash
+git status --short
+git pull --ff-only
+```
+
+Review any local tracked-file changes before pulling. The normal local configuration files, `.env` and `firewalls.yml`, are ignored by Git and must remain in place. Do not replace `firewalls.yml` with `firewalls_example.yml`.
+
+For an archive-based installation, extract the new project release over a copy of the existing directory and restore the saved `.env` and `firewalls.yml` before running the generator. Preserve `influxdb-data/` and `grafana-data/` if the installation is moved to a new directory.
+
+### 3. Regenerate and Restart the Stack
+
+Always run the generator after an upgrade:
+
+```bash
+./generate.sh
+```
+
+Do not use only `docker compose up -d`. The generator validates the existing inventory, recreates the Telegraf and API runtime files, downloads any required MIBs, rebuilds the Telegraf image, and starts or refreshes the stack. Existing InfluxDB history and Grafana state remain in their persistent data directories.
+
+### 4. Verify the Upgrade
+
+```bash
+docker compose ps
+docker compose logs --tail=100 telegraf
+```
+
+Then open `http://<docker-host-ip>:3000`, open the relevant dashboard, and verify each configured hostname.
+
+### 5. Enable API Monitoring Gradually
+
+The upgrade does not automatically enable API monitoring. Migrate Palo Alto firewalls one at a time:
+
+1. Add `api_monitoring` only to the Palo Alto firewalls you want to migrate.
+2. Generate missing keys with `paloalto_api_key.py`, or paste existing keys into the local inventory.
+3. Run `./generate.sh` again to recreate `telegraf/telegraf.conf`, `telegraf/paloalto-api.json`, and `telegraf/paloalto-api.env`.
+4. Check `docker compose ps` and `docker compose logs --tail=100 telegraf`.
+5. Open `Palo Alto API Performance Monitoring` in Grafana and select each migrated hostname.
+
+### Rollback
+
+To roll back only API monitoring without affecting SNMP, set `api_monitoring.enabled: false` or remove the block, then rerun `./generate.sh`.
+
+To roll back the local configuration, copy `.env` and `firewalls.yml` back from the protected backup directory, then rerun the generator. If the project code itself must also be rolled back, restore the previous release or Git tag first. Do not delete `influxdb-data/` or `grafana-data/` during a routine rollback.
 
 ## Palo Alto SNMP Setup
 
@@ -404,6 +673,8 @@ These files/directories are generated locally and ignored by Git:
 - `.firewalls.generated.yml`
 - `logs/`
 - `telegraf/telegraf.conf`
+- `telegraf/paloalto-api.json`
+- `telegraf/paloalto-api.env`
 - `telegraf/mibs/paloalto/`
 - `grafana-data/`
 - `influxdb-data/`
@@ -411,6 +682,10 @@ These files/directories are generated locally and ignored by Git:
 ## References
 
 - Palo Alto Networks SNMP monitoring documentation: https://docs.paloaltonetworks.com/pan-os/11-1/pan-os-admin/monitoring/snmp-monitoring-and-traps/monitor-statistics-using-snmp
+- Palo Alto Networks XML API request types: https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions
+- Palo Alto Networks operational commands through the XML API: https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions/run-operational-mode-commands-api
+- Palo Alto Networks operational CLI command hierarchy: https://docs.paloaltonetworks.com/ngfw/pan-os-cli-quick-start/cli-command-hierarchy
+- Palo Alto Networks XML API request structure and authentication: https://docs.paloaltonetworks.com/ngfw/api/getting-started/structure-of-a-pan-os-xml-api-request
 - Palo Alto Networks CLI command hierarchy for SNMPv3: https://docs.paloaltonetworks.com/pan-os/11-1/pan-os-cli-quick-start/cli-command-hierarchy/pan-os-11-1-configure-cli-command-hierarchy
 - Fortinet `config system snmp user`: https://docs.fortinet.com/document/fortigate/7.6.3/cli-reference/292257317/config-system-snmp-user
 - Fortinet `config system snmp community`: https://docs.fortinet.com/document/fortigate/7.0.1/cli-reference/54620/config-system-snmp-community

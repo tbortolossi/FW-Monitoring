@@ -5,6 +5,8 @@ influxdb-data.backup-*/
 
 # Generated local configuration
 telegraf/telegraf.conf
+telegraf/paloalto-api.json
+telegraf/paloalto-api.env
 .firewalls.generated.yml
 
 # Local firewall inventories may contain real IPs and SNMP credentials.
