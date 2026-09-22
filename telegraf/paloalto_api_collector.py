@@ -4,6 +4,16 @@
 The process is designed for Telegraf's ``inputs.execd`` plugin.  It keeps API
 calls for a given firewall sequentially while polling different firewalls in
 parallel, then emits InfluxDB line protocol on stdout.
+
+Field typing: InfluxDB rejects a point whose field type differs from the type
+already stored for that field, so every physical sensor value (temperature,
+fan RPM, watts, volts, amps, sensor value/min/max and chassis power figures)
+is always emitted as a float, even when PAN-OS prints it as "12". Counters and
+other integer-natured values (sessions, CPS, octets, packets) stay integers.
+
+Optional categories (VSYS, environmentals, ingress backlogs, log receiver,
+GlobalProtect, software processes, RAID) are disabled for a firewall once
+PAN-OS rejects their command, so they never affect other categories.
 """
 
 from __future__ import annotations
@@ -38,10 +48,22 @@ POWER_COMMAND = "<show><system><environmentals><power></power></environmentals><
 CHASSIS_INVENTORY_COMMAND = "<show><chassis><inventory></inventory></chassis></show>"
 CHASSIS_STATUS_COMMAND = "<show><chassis><status></status></chassis></show>"
 CHASSIS_POWER_COMMAND = "<show><chassis><power></power></chassis></show>"
+# The last completed one-minute bucket gives a per-core average and a per-core
+# maximum, which is more representative than a single one-second sample.
 DATAPLANE_COMMAND = (
-    "<show><running><resource-monitor><second><last>1</last></second>"
+    "<show><running><resource-monitor><minute><last>1</last></minute>"
     "</resource-monitor></running></show>"
 )
+INGRESS_BACKLOGS_COMMAND = (
+    "<show><running><resource-monitor><ingress-backlogs></ingress-backlogs>"
+    "</resource-monitor></running></show>"
+)
+LOGGING_COMMAND = "<debug><log-receiver><statistics></statistics></log-receiver></debug>"
+GLOBALPROTECT_COMMAND = (
+    "<show><global-protect-gateway><statistics></statistics></global-protect-gateway></show>"
+)
+SOFTWARE_COMMAND = "<show><system><software><status></status></software></system></show>"
+RAID_COMMAND = "<show><system><raid><detail></detail></raid></system></show>"
 COUNTER_COMMAND = (
     "<show><counter><global><filter><severity>drop</severity></filter>"
     "</global></counter></show>"
@@ -95,12 +117,32 @@ LOGICAL_DROP_COUNTERS = (
 )
 
 # PAN-OS messages for commands that a platform or release does not implement.
+# Also matches authorization failures: an admin role that lacks the right for an
+# optional command (for example the debug log-receiver statistics) should have
+# that category disabled once instead of logging the refusal on every poll.
 UNSUPPORTED_PATTERN = re.compile(
     r"(?i)invalid syntax|not supported|unsupported|unknown command|is unexpected|is not a valid"
+    r"|not authorized|unauthorized|permission denied|insufficient privilege|forbidden|access denied"
 )
 # Categories that some platforms or releases do not implement. They are
 # disabled for that firewall after PAN-OS rejects the command.
-OPTIONAL_CATEGORIES = {"vsys", "thermal", "fans", "power"}
+OPTIONAL_CATEGORIES = {
+    "vsys",
+    "thermal",
+    "fans",
+    "power",
+    "ingress_backlogs",
+    "logging",
+    "globalprotect",
+    "software",
+    "raid",
+}
+# Extra messages that mean "feature not in use" for specific optional
+# categories, e.g. GlobalProtect statistics on a firewall without a gateway.
+OPTIONAL_DISABLE_PATTERNS = {
+    "globalprotect": re.compile(r"(?i)not configured|no gateway|not enabled|not licensed|no such"),
+}
+DATAPLANE_NAME_PATTERN = re.compile(r"(?i)(?:^|[-_])(?:s(?:lot)?\d+[-_]?)?dp\d+$")
 
 
 class ApiError(RuntimeError):
@@ -131,14 +173,25 @@ def _last_number(value: object):
     return valid[-1] if valid else None
 
 
+def _float(value: object):
+    number = _number(value)
+    return float(number) if number is not None else None
+
+
 def _first_number(root: ET.Element, *names: str):
-    wanted = {name.lower().replace("_", "-") for name in names}
-    for element in root.iter():
-        name = _local_name(element.tag).lower().replace("_", "-")
-        if name in wanted:
-            value = _number(element.text)
-            if value is not None:
-                return value
+    """Return the value of the first alias present anywhere, in alias priority order.
+
+    Document order does not matter: ``num-active`` wins over ``num-installed``
+    even when PAN-OS lists the cumulative installed count first.
+    """
+    elements = [(_local_name(element.tag).lower().replace("_", "-"), element) for element in root.iter()]
+    for alias in names:
+        wanted = alias.lower().replace("_", "-")
+        for name, element in elements:
+            if name == wanted:
+                value = _number(element.text)
+                if value is not None:
+                    return value
     return None
 
 
@@ -190,10 +243,19 @@ def parse_system_info(result: ET.Element) -> dict:
         "serial": "serial",
         "sw-version": "panos_version",
         "uptime": "uptime",
+        "app-version": "app_version",
+        "threat-version": "threat_version",
+        "av-version": "av_version",
+        "wildfire-version": "wildfire_version",
+        "url-filtering-version": "url_filtering_version",
+        "multi-vsys": "multi_vsys",
+        "operational-mode": "operational_mode",
+        "device-certificate-status": "device_certificate_status",
+        "family": "family",
     }
     for element in system.iter():
         field = aliases.get(_local_name(element.tag))
-        if field and element.text:
+        if field and element.text and element.text.strip():
             fields[field] = element.text.strip()
     uptime_seconds = parse_uptime_seconds(fields.get("uptime"))
     if uptime_seconds is not None:
@@ -390,38 +452,46 @@ def parse_management_processes(result: ET.Element, limit: int = 32) -> list[tupl
 
 
 def parse_dataplane_resources(result: ET.Element) -> list[tuple[dict, dict]]:
-    """Return per-core average CPU values from the variable resource-monitor XML tree."""
-    points = []
+    """Return per-core CPU values from the variable resource-monitor XML tree.
+
+    ``cpu_pct`` comes from ``cpu-load-average`` and ``cpu_max_pct`` from
+    ``cpu-load-maximum`` of the same bucket (the last completed minute).  A
+    synthetic ``core="average"`` point per dataplane carries the mean of the
+    per-core averages and the max of the per-core maxima.
+    """
+    tables = {"cpu-load-average": "cpu_pct", "cpu-load-maximum": "cpu_max_pct"}
+    values = {}
 
     def walk(node: ET.Element, dataplane: str | None = None):
         local = _local_name(node.tag).lower()
         candidate = node.attrib.get("name", local).lower()
-        if re.search(r"(?i)(?:^|[-_])(?:s(?:lot)?\d+[-_]?)?dp\d+$", candidate):
+        if DATAPLANE_NAME_PATTERN.search(candidate):
             dataplane = candidate
-        if local == "cpu-load-average":
+        field = tables.get(local)
+        if field:
             for entry in node.findall("./entry"):
                 core = (entry.findtext("coreid") or entry.findtext("core") or "all").strip()
                 value = _last_number(entry.findtext("value"))
                 if value is not None:
-                    points.append(
-                        ({"dataplane": dataplane or "dp0", "core": core}, {"cpu_pct": float(value)})
-                    )
+                    values.setdefault((dataplane or "dp0", core), {})[field] = float(value)
         for child in node:
             walk(child, dataplane)
 
     walk(result)
-    deduplicated = {}
-    for tags, fields in points:
-        deduplicated[(tags["dataplane"], tags["core"])] = (tags, fields)
+    points = {key: ({"dataplane": key[0], "core": key[1]}, fields) for key, fields in values.items()}
     per_dataplane = {}
-    for tags, fields in deduplicated.values():
-        per_dataplane.setdefault(tags["dataplane"], []).append(float(fields["cpu_pct"]))
-    for dataplane, values in per_dataplane.items():
-        deduplicated[(dataplane, "average")] = (
-            {"dataplane": dataplane, "core": "average"},
-            {"cpu_pct": sum(values) / len(values)},
-        )
-    return list(deduplicated.values())
+    for (dataplane, _core), fields in values.items():
+        per_dataplane.setdefault(dataplane, []).append(fields)
+    for dataplane, cores in per_dataplane.items():
+        averages = [fields["cpu_pct"] for fields in cores if "cpu_pct" in fields]
+        maxima = [fields["cpu_max_pct"] for fields in cores if "cpu_max_pct" in fields]
+        summary = {}
+        if averages:
+            summary["cpu_pct"] = sum(averages) / len(averages)
+        if maxima:
+            summary["cpu_max_pct"] = max(maxima)
+        points[(dataplane, "average")] = ({"dataplane": dataplane, "core": "average"}, summary)
+    return list(points.values())
 
 
 def parse_dataplane_utilization(result: ET.Element) -> list[tuple[dict, dict]]:
@@ -430,7 +500,7 @@ def parse_dataplane_utilization(result: ET.Element) -> list[tuple[dict, dict]]:
     def walk(node: ET.Element, dataplane: str | None = None):
         local = _local_name(node.tag).lower()
         candidate = node.attrib.get("name", local).lower()
-        if re.search(r"(?i)(?:^|[-_])(?:s(?:lot)?\d+[-_]?)?dp\d+$", candidate):
+        if DATAPLANE_NAME_PATTERN.search(candidate):
             dataplane = candidate
         if local == "resource-utilization":
             for entry in node.findall("./entry"):
@@ -615,23 +685,52 @@ def parse_ha_state(result: ET.Element) -> dict:
     if not enabled:
         fields["state"] = "standalone"
         return fields
-    state = (result.findtext(".//local-info/state") or result.findtext(".//state") or "unknown").strip()
-    mode = (result.findtext(".//local-info/mode") or result.findtext(".//mode") or "").strip()
-    group = (result.findtext(".//group") or "").strip()
+
+    def first_text(*paths: str) -> str:
+        for path in paths:
+            value = (result.findtext(path) or "").strip()
+            if value:
+                return value
+        return ""
+
+    state = first_text(".//local-info/state", ".//state") or "unknown"
+    mode = first_text(".//local-info/mode", ".//mode")
+    # <group> is a container element; its identifier lives in <group-id>.
+    group = first_text(".//group/group-id", ".//group-id")
     fields["state"] = state
     if mode:
         fields["mode"] = mode
     if group:
         fields["group"] = group
-    for destination, path in (
-        ("peer_state", ".//peer-info/state"),
-        ("peer_connection", ".//peer-info/conn-status"),
-        ("config_sync", ".//running-sync"),
-        ("state_sync", ".//local-info/state-sync"),
+    for destination, paths in (
+        ("peer_state", (".//peer-info/state",)),
+        ("peer_connection", (".//peer-info/conn-status",)),
+        ("config_sync", (".//running-sync",)),
+        ("state_sync", (".//local-info/state-sync",)),
+        ("state_reason", (".//local-info/state-reason",)),
+        ("state_duration", (".//local-info/state-duration",)),
+        (
+            "ha1_status",
+            (".//local-info/ha1/conn-status", ".//ha1/conn-status", ".//peer-info/conn-ha1/conn-status"),
+        ),
+        (
+            "ha2_status",
+            (".//local-info/ha2/conn-status", ".//ha2/conn-status", ".//peer-info/conn-ha2/conn-status"),
+        ),
+        ("link_monitoring", (".//group/link-monitoring/enabled", ".//link-monitoring/enabled")),
+        ("path_monitoring", (".//path-monitoring/enabled",)),
+        ("preemptive", (".//local-info/preemptive", ".//preemptive")),
     ):
-        value = (result.findtext(path) or "").strip()
+        value = first_text(*paths)
         if value:
             fields[destination] = value
+    for destination, path in (
+        ("local_priority", ".//local-info/priority"),
+        ("peer_priority", ".//peer-info/priority"),
+    ):
+        value = _number(result.findtext(path))
+        if value is not None:
+            fields[destination] = int(value)
     return fields
 
 
@@ -686,12 +785,12 @@ def parse_environmentals(result: ET.Element, sensor_type: str) -> list[tuple[dic
         for child in entry:
             destination = numeric_fields.get(_local_name(child.tag).lower())
             if destination:
-                value = _number(child.text)
+                # PAN-OS may format the same reading as "12" and later
+                # "12.5"; physical values are always floats so the InfluxDB
+                # field type never flips.
+                value = _float(child.text)
                 if value is not None:
-                    # PAN-OS may format the same temperature as "42" and
-                    # later "42.5". Keep its InfluxDB field type stable while
-                    # preserving the established integer type of min/max/RPM.
-                    fields[destination] = float(value) if destination == "degrees_c" else value
+                    fields[destination] = value
         alarm = (entry.findtext("alarm") or "").strip()
         if alarm:
             fields["alarm"] = alarm
@@ -803,7 +902,7 @@ def parse_chassis_power(result: ET.Element) -> list[tuple[dict, dict]]:
             (("used", "used-w"), "used_w"),
             (("remaining", "remaining-w"), "remaining_w"),
         ):
-            value = _number(_entry_text(entry, *source))
+            value = _float(_entry_text(entry, *source))
             if value is not None:
                 fields[destination] = value
         if fields:
@@ -818,10 +917,253 @@ def parse_chassis_power(result: ET.Element) -> list[tuple[dict, dict]]:
     ):
         value = _first_number(summary_node, *source) if summary_node is not None else None
         if value is not None:
-            summary[destination] = value
+            summary[destination] = float(value)
     if summary:
         points.append(({"slot": "chassis", "component": "power_summary"}, summary))
     return points
+
+
+def _field_name(label: str, suffix: str = "") -> str:
+    """Normalize a free-text label to a bounded ``[a-z0-9_]`` field name."""
+    base = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+    return (base[: 64 - len(suffix)].rstrip("_") + suffix) if base else ""
+
+
+def _dataplane_label(slot: str | None, dataplane: str, known: set[str]) -> str:
+    """Map a text header such as ``SLOT: s1, DP: dp0`` to resource-monitor names."""
+    dataplane = dataplane.lower()
+    if not slot:
+        return dataplane
+    slot = slot.lower()
+    slot = slot if slot.startswith("s") else f"s{slot}"
+    combined = f"{slot}{dataplane}"
+    # Fixed platforms print a slot but resource-monitor names the DP plainly.
+    if combined not in known and dataplane in known:
+        return dataplane
+    return combined
+
+
+def parse_ingress_backlogs(result: ET.Element, known_dataplanes=()) -> list[tuple[dict, dict]]:
+    """Parse ``show running resource-monitor ingress-backlogs`` per dataplane.
+
+    Every known dataplane gets a point; a dataplane without backlog reports
+    ``usage_pct=0.0`` and ``sessions=0`` so dashboards draw a flat zero.
+
+    Accepted forms (only the text header/row layout is taken from real
+    PAN-OS output; the other variants are defensive guesses):
+      * text: ``-- SLOT: s1, DP: dp0 --`` / ``-- DP dp0 --`` / ``DP s1dp0``
+        headers, an optional ``USAGE - ATOMIC: 92% TOTAL: 93%`` line, then
+        session rows starting with a session id and a percentage
+        (``6   92%   1   156``);
+      * empty output or a line such as ``none`` (no backlog at all);
+      * XML (guess): ``<dp name="dp0">`` or ``<entry name="s1dp0">`` nodes
+        whose ``entry`` children carry a usage/pct value.
+    """
+    known = {str(name).lower() for name in known_dataplanes}
+    per_dp: dict[str, dict] = {}
+
+    def record(dataplane: str, usage: float | None = None, session: bool = False):
+        fields = per_dp.setdefault(dataplane, {"usage_pct": 0.0, "sessions": 0})
+        if usage is not None:
+            fields["usage_pct"] = max(fields["usage_pct"], float(usage))
+        if session:
+            fields["sessions"] += 1
+
+    usage_names = {"usage", "pct", "percent", "percentage", "usage-pct", "total"}
+    xml_nodes = [
+        node
+        for node in result.iter()
+        if node is not result
+        and (
+            _local_name(node.tag).lower() == "dp"
+            or DATAPLANE_NAME_PATTERN.search(node.attrib.get("name", _local_name(node.tag)).lower())
+        )
+    ]
+    for node in xml_nodes:
+        name = (node.attrib.get("name") or node.findtext("name") or "").strip().lower()
+        if not name:
+            local = _local_name(node.tag).lower()
+            name = local if local != "dp" else (node.text or "").strip().lower()
+        if not DATAPLANE_NAME_PATTERN.search(name or ""):
+            continue
+        record(name)
+        for entry in node.iter():
+            if entry is node or _local_name(entry.tag).lower() != "entry":
+                continue
+            usage = None
+            for child in entry:
+                if _local_name(child.tag).lower() in usage_names:
+                    usage = _number((child.text or "").replace("%", ""))
+                    if usage is not None:
+                        break
+            if usage is not None:
+                record(name, usage, session=True)
+
+    if not xml_nodes:
+        header = re.compile(
+            r"(?i)^\s*(?:-+\s*)?(?:SLOT:?\s*(s?\d+)\s*,?\s*)?DP:?\s*(s?\d*[-_]?dp\d+)\s*(?:-+)?\s*$"
+        )
+        total = re.compile(r"(?i)(?:ATOMIC|TOTAL)\s*:\s*([\d.]+)\s*%")
+        row = re.compile(r"^\s*(\d+)\s+([\d.]+)\s*%")
+        current = None
+        for line in _result_text(result).splitlines():
+            match = header.match(line)
+            if match:
+                current = _dataplane_label(match.group(1), match.group(2), known)
+                record(current)
+                continue
+            if current is None:
+                continue
+            match = row.match(line)
+            if match:
+                record(current, float(match.group(2)), session=True)
+                continue
+            for value in total.findall(line):
+                record(current, float(value))
+
+    for dataplane in known:
+        record(dataplane)
+    return [({"dataplane": dataplane}, fields) for dataplane, fields in sorted(per_dp.items())]
+
+
+def parse_log_receiver(result: ET.Element) -> dict:
+    """Parse ``debug log-receiver statistics`` into rates and cumulative counters."""
+    fields = {}
+    rate = re.compile(r"^\s*(.+?)\s+rate\s*:\s*([\d.]+)\s*/\s*sec", re.I)
+    counter = re.compile(r"^\s*(.+?)\s*:\s*(\d+)\s*$")
+    for line in _result_text(result).splitlines():
+        match = rate.match(line)
+        if match:
+            name = _field_name(match.group(1), "_rate")
+            if name:
+                fields[name] = float(match.group(2))
+            continue
+        match = counter.match(line)
+        if match and re.search(r"(?i)discard|dropped|total", match.group(1)):
+            name = _field_name(match.group(1))
+            if name:
+                fields[name] = int(match.group(2))
+    return fields
+
+
+def parse_globalprotect(result: ET.Element) -> list[tuple[dict, dict]]:
+    """Return GlobalProtect gateway user counts, overall and per gateway."""
+    points = []
+    totals = {}
+    for destination, source in (("current_users", "TotalCurrentUsers"), ("previous_users", "TotalPreviousUsers")):
+        value = _first_number(result, source)
+        if value is not None:
+            totals[destination] = int(value)
+    if totals:
+        points.append(({}, totals))
+    for gateway in result.iter():
+        if _local_name(gateway.tag).lower() != "gateway":
+            continue
+        for entry in gateway.findall("./entry"):
+            name = (entry.findtext("name") or entry.attrib.get("name") or "").strip()
+            if not name:
+                continue
+            fields = {}
+            for destination, source in (("current_users", "CurrentUsers"), ("previous_users", "PreviousUsers")):
+                value = _number(_entry_text(entry, source))
+                if value is not None:
+                    fields[destination] = int(value)
+            if fields:
+                points.append(({"gateway": name[:120]}, fields))
+    return points
+
+
+SOFTWARE_STATE_PATTERN = re.compile(
+    r"(?i)^(running|active|inactive|stopped|exited|failed|dead|down|up|starting|stopping|"
+    r"disabled|crashed|not\s+running)\b"
+)
+
+
+def parse_software_status(result: ET.Element, limit: int = 256) -> list[tuple[dict, dict]]:
+    """Parse ``show system software status`` process lines.
+
+    Accepts ``Process devsrvr   running   (pid: 1234)``, ``Process: devsrvr
+    (pid: 1234)  running`` and ``mgmtsrvr: running``.  When a process is listed
+    several times (chassis slots), it is reported running only if every
+    instance runs.
+    """
+    processes: dict[str, dict] = {}
+    labelled = re.compile(r"(?i)^\s*process:?\s+(\S+)\s*(.*)$")
+    short = re.compile(r"^\s*([A-Za-z][\w.-]*)\s*:\s*(.+?)\s*$")
+    for line in _result_text(result).splitlines():
+        match = labelled.match(line)
+        if match:
+            process, rest = match.group(1).rstrip(":"), match.group(2)
+        else:
+            match = short.match(line)
+            if not match:
+                continue
+            process, rest = match.groups()
+        state_text = re.sub(r"\([^)]*\)", " ", rest).strip()
+        state = SOFTWARE_STATE_PATTERN.match(state_text)
+        if not state:
+            continue
+        status = re.sub(r"\s+", " ", state.group(1))
+        running = status.lower() in {"running", "active"}
+        process = process[:80]
+        existing = processes.get(process)
+        if existing is None:
+            if len(processes) >= limit:
+                continue
+            processes[process] = {"running": running, "status": status}
+        elif existing["running"] and not running:
+            processes[process] = {"running": running, "status": status}
+    return [({"process": process}, fields) for process, fields in sorted(processes.items())]
+
+
+RAID_HEALTHY_PATTERN = re.compile(r"(?i)^(ok|online|active|clean|optimal|present|available)")
+
+
+def parse_raid(result: ET.Element) -> list[tuple[dict, dict]]:
+    """Parse ``show system raid detail`` text (or a simple XML entry form).
+
+    Text lines such as ``Disk Pair A   Available``, ``  Disk id A1   Present``,
+    ``Disk1: OK`` and a ``Status clean`` line (array state, reported as
+    ``array`` or ``disk_pair_<x>_array`` inside a pair) are recognised.
+    """
+    disks: dict[str, str] = {}
+    for entry in result.iter():
+        if _local_name(entry.tag).lower() != "entry":
+            continue
+        name = (entry.attrib.get("name") or _entry_text(entry, "name", "disk")).strip()
+        status = _entry_text(entry, "status", "state")
+        if name and status:
+            disks[_field_name(name)[:64] or name] = status
+    if not disks:
+        disk_line = re.compile(
+            r"(?i)^\s*disk\s*(pair\s+|id\s+)?([a-z]?\d+[a-z]?|[a-z])\b\s*:?\s+(\S.*?)\s*$"
+        )
+        status_line = re.compile(r"(?i)^\s*(?:array\s+)?status\s*:?\s+(\S.*?)\s*$")
+        pair = None
+        # A Status line belongs to the array (or pair) only before the first
+        # member disk line; per-disk detail lines are ignored.
+        array_context = True
+        for line in _result_text(result).splitlines():
+            match = disk_line.match(line)
+            if match:
+                kind, token, status = match.groups()
+                token = token.lower()
+                if kind and kind.lower().startswith("pair"):
+                    name = f"disk_pair_{token}"
+                    pair = name
+                    array_context = True
+                else:
+                    name = f"disk{token}" if token.isdigit() else f"disk_{token}"
+                    array_context = False
+                disks[name] = re.sub(r"\s+", " ", status)
+                continue
+            match = status_line.match(line)
+            if match and array_context:
+                disks[f"{pair}_array" if pair else "array"] = re.sub(r"\s+", " ", match.group(1))
+    return [
+        ({"disk": disk}, {"status": status, "healthy": bool(RAID_HEALTHY_PATTERN.match(status))})
+        for disk, status in sorted(disks.items())
+    ]
 
 
 def _escape(value: object, *, tag: bool = False) -> str:
@@ -850,8 +1192,13 @@ def line_protocol(measurement: str, tags: dict, fields: dict) -> str | None:
     return f"{_escape(measurement)}{tag_text} {','.join(encoded)}"
 
 
-def _is_unsupported(exc: Exception) -> bool:
-    return isinstance(exc, ApiError) and bool(UNSUPPORTED_PATTERN.search(str(exc)))
+def _is_unsupported(exc: Exception, category: str | None = None) -> bool:
+    if not isinstance(exc, ApiError):
+        return False
+    if UNSUPPORTED_PATTERN.search(str(exc)):
+        return True
+    extra = OPTIONAL_DISABLE_PATTERNS.get(category or "")
+    return bool(extra and extra.search(str(exc)))
 
 
 def _collect_counters(config: dict) -> list[tuple[dict, dict]]:
@@ -901,9 +1248,15 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
             "paloalto_api_chassis_power",
         ),
         "system": (SYSTEM_INFO_COMMAND, parse_system_info, "paloalto_api_system"),
+        "logging": (LOGGING_COMMAND, parse_log_receiver, "paloalto_api_logging"),
+        "globalprotect": (GLOBALPROTECT_COMMAND, parse_globalprotect, "paloalto_api_globalprotect"),
+        "software": (SOFTWARE_COMMAND, parse_software_status, "paloalto_api_software"),
+        "raid": (RAID_COMMAND, parse_raid, "paloalto_api_raid"),
     }
     # interface_status runs before interfaces so logical counters get zone/VSYS
-    # tags from the first polling cycle.
+    # tags from the first polling cycle; system runs first so chassis/high-end
+    # gating is known, and dataplane runs before ingress_backlogs so the DP
+    # names are known for zero-filling.
     categories = (
         "system",
         "sessions",
@@ -912,12 +1265,17 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
         "interfaces",
         "management",
         "dataplane",
+        "ingress_backlogs",
         "counters",
         "ha",
         "storage",
         "thermal",
         "fans",
         "power",
+        "logging",
+        "globalprotect",
+        "software",
+        "raid",
         "chassis_inventory",
         "chassis_status",
         "chassis_power",
@@ -927,6 +1285,8 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
         if category not in due or category in unsupported:
             continue
         if category.startswith("chassis_") and not config.get("_is_chassis", False):
+            continue
+        if category == "raid" and not (config.get("_is_chassis") or config.get("_is_highend")):
             continue
         try:
             if category == "interfaces":
@@ -948,9 +1308,22 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
                 )
             elif category == "dataplane":
                 result = request_xml(config, DATAPLANE_COMMAND)
+                cpu_points = parse_dataplane_resources(result)
+                utilization_points = parse_dataplane_utilization(result)
+                dataplanes = sorted({tags["dataplane"] for tags, _ in cpu_points + utilization_points})
+                if dataplanes:
+                    config["_dataplanes"] = dataplanes
                 parsed_sets = (
-                    ("paloalto_api_dataplane_cpu", parse_dataplane_resources(result)),
-                    ("paloalto_api_dataplane_resources", parse_dataplane_utilization(result)),
+                    ("paloalto_api_dataplane_cpu", cpu_points),
+                    ("paloalto_api_dataplane_resources", utilization_points),
+                )
+            elif category == "ingress_backlogs":
+                result = request_xml(config, INGRESS_BACKLOGS_COMMAND)
+                parsed_sets = (
+                    (
+                        "paloalto_api_ingress_backlogs",
+                        parse_ingress_backlogs(result, config.get("_dataplanes", ())),
+                    ),
                 )
             else:
                 command, parser, measurement = commands[category]
@@ -959,6 +1332,11 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
                     model = str(parsed.get("model", ""))
                     config["_is_chassis"] = bool(
                         re.search(r"(^|[^0-9])(5450|7050|7080|7500)([^0-9]|$)", model)
+                    )
+                    # High-end platforms with a RAID disk pair (PA-5200/5400/
+                    # 5500/7000/7500 Series).
+                    config["_is_highend"] = bool(
+                        re.search(r"(?i)(?:^|[^0-9])(?:52|54|55|70|75)\d\d(?:[^0-9]|$)", model)
                     )
                 elif category == "interface_status":
                     config["_interface_context"] = interface_context(parsed)
@@ -969,13 +1347,45 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
                     if line:
                         output.append(line)
         except Exception as exc:  # keep other categories and firewalls alive
-            if category in OPTIONAL_CATEGORIES and _is_unsupported(exc):
+            if category in OPTIONAL_CATEGORIES and _is_unsupported(exc, category):
                 # Avoid logging the same unsupported command on every poll.
                 unsupported.add(category)
                 print(f"paloalto-api [{hostname}] {category}: disabled, not supported: {exc}", file=sys.stderr, flush=True)
                 continue
             print(f"paloalto-api [{hostname}] {category}: {exc}", file=sys.stderr, flush=True)
     return output
+
+
+def _every(key: str, default: int):
+    return lambda cfg: int(cfg.get(key, default))
+
+
+# Single source of truth for the polling interval of every category (seconds).
+# ``dataplane`` reads the last completed one-minute resource-monitor bucket, so
+# a ``resource_interval`` below 60 s re-reads the same minute.
+CATEGORY_SCHEDULES = {
+    "sessions": _every("interval", 20),
+    "interfaces": _every("interval", 20),
+    "vsys": _every("resource_interval", 60),
+    "interface_status": _every("resource_interval", 60),
+    "management": _every("resource_interval", 60),
+    "dataplane": _every("resource_interval", 60),
+    "ingress_backlogs": _every("resource_interval", 60),
+    "counters": _every("counter_interval", 60),
+    "ha": _every("resource_interval", 60),
+    "thermal": _every("resource_interval", 60),
+    "fans": _every("resource_interval", 60),
+    "power": _every("resource_interval", 60),
+    "logging": _every("resource_interval", 60),
+    "globalprotect": _every("resource_interval", 60),
+    "software": _every("resource_interval", 60),
+    "raid": _every("system_interval", 3600),
+    "storage": _every("system_interval", 3600),
+    "system": _every("system_interval", 3600),
+    "chassis_inventory": _every("system_interval", 3600),
+    "chassis_status": _every("resource_interval", 60),
+    "chassis_power": _every("resource_interval", 60),
+}
 
 
 def load_config(path: Path) -> list[dict]:
@@ -997,7 +1407,14 @@ def load_environment_file(path: Path) -> None:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
             raise ValueError(f"invalid environment variable name in {path}: {name!r}")
         value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] == "'":
+        if len(value) >= 2 and value[0] == value[-1] == '"':
+            # Current generator format: double quotes, with backslash, double
+            # quote and dollar sign each prefixed by one backslash (the same
+            # rules Docker Compose applies to env_file values).
+            value = re.sub(r"\\(.)", r"\1", value[1:-1])
+        elif len(value) >= 2 and value[0] == value[-1] == "'":
+            # Legacy single-quoted format written by generators before the
+            # double-quote change; kept so old runtime files still load.
             encoded = value[1:-1]
             decoded = []
             index = 0
@@ -1011,12 +1428,7 @@ def load_environment_file(path: Path) -> None:
 
 
 def run_once(configs: list[dict], categories: set[str] | None = None) -> int:
-    selected = categories or {
-        "sessions", "vsys", "interfaces", "interface_status", "management", "dataplane",
-        "counters", "ha", "storage", "thermal", "fans", "power", "system",
-        "chassis_inventory", "chassis_power",
-        "chassis_status",
-    }
+    selected = categories or set(CATEGORY_SCHEDULES)
     with ThreadPoolExecutor(max_workers=max(1, min(8, len(configs)))) as executor:
         futures = [executor.submit(collect_firewall, config, selected) for config in configs]
         for future in as_completed(futures):
@@ -1029,24 +1441,7 @@ def run_daemon(configs: list[dict]) -> int:
     stopped = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_args: stopped.set())
     signal.signal(signal.SIGINT, lambda *_args: stopped.set())
-    schedules = {
-        "sessions": lambda cfg: int(cfg.get("interval", 20)),
-        "interfaces": lambda cfg: int(cfg.get("interval", 20)),
-        "vsys": lambda cfg: int(cfg.get("resource_interval", 60)),
-        "interface_status": lambda cfg: int(cfg.get("resource_interval", 60)),
-        "management": lambda cfg: int(cfg.get("resource_interval", 60)),
-        "dataplane": lambda cfg: int(cfg.get("resource_interval", 60)),
-        "counters": lambda cfg: int(cfg.get("counter_interval", 60)),
-        "ha": lambda cfg: int(cfg.get("resource_interval", 60)),
-        "thermal": lambda cfg: int(cfg.get("resource_interval", 60)),
-        "fans": lambda cfg: int(cfg.get("resource_interval", 60)),
-        "power": lambda cfg: int(cfg.get("resource_interval", 60)),
-        "storage": lambda cfg: int(cfg.get("system_interval", 3600)),
-        "system": lambda cfg: int(cfg.get("system_interval", 3600)),
-        "chassis_inventory": lambda cfg: int(cfg.get("system_interval", 3600)),
-        "chassis_status": lambda cfg: int(cfg.get("resource_interval", 60)),
-        "chassis_power": lambda cfg: int(cfg.get("resource_interval", 60)),
-    }
+    schedules = CATEGORY_SCHEDULES
     next_due = {(index, category): 0.0 for index in range(len(configs)) for category in schedules}
     while not stopped.is_set():
         now = time.monotonic()
