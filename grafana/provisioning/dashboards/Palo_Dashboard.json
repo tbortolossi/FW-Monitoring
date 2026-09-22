@@ -461,7 +461,7 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "description": "HA role history. Expand this row when correlating CPU, sessions, or throughput with Active/Passive role changes. The query only returns Active/Passive samples, so standalone firewalls do not show a misleading HA timeline.",
+          "description": "HA role history. Expand this row when correlating CPU, sessions, or throughput with Active/Passive role changes. Standalone firewalls remain visible as Standalone instead of producing an empty timeline.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -531,7 +531,7 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"ha_state\")\n  |> map(fn: (r) => ({ r with\n    _field: \"HA role\",\n    _value: if r._value == \"active\" then \"Active\" else if r._value == \"passive\" then \"Passive\" else if r._value == \"active-primary\" then \"Active\" else if r._value == \"active-secondary\" then \"Active\" else \"\"\n  }))\n  |> filter(fn: (r) => r._value == \"Active\" or r._value == \"Passive\")\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"ha_state\")\n  |> map(fn: (r) => ({ r with\n    _field: \"HA role\",\n    _value: if r._value == \"active\" then \"Active\" else if r._value == \"passive\" then \"Passive\" else if r._value == \"active-primary\" then \"Active\" else if r._value == \"active-secondary\" then \"Active\" else if r._value == \"disabled\" or r._value == \"standalone\" then \"Standalone\" else \"Unknown\"\n  }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
