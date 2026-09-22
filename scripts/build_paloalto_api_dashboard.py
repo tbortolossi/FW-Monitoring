@@ -96,13 +96,32 @@ def stat(panel_id: int, title: str, query: str, x: int, y: int, w: int, unit: st
     }
 
 
-def kpi(panel_id: int, title: str, query: str, x: int, y: int, unit: str, *, levels: dict | None = None, description: str = "") -> dict:
-    """Colored current-value tile for the at-a-glance load strip."""
-    panel = stat(panel_id, title, query, x, y, 3, unit, 1 if unit == "percent" else None)
+def kpi(panel_id: int, title: str, query: str, x: int, y: int, unit: str, *, levels: dict | None = None,
+        description: str = "", sparkline: bool = True, w: int = 3) -> dict:
+    """Colored current-value tile for the at-a-glance load strip.
+
+    The query returns a short history so the tile shows a 30-minute sparkline
+    behind the current value; the displayed number is always the latest point.
+    """
+    panel = stat(panel_id, title, query, x, y, w, unit, 1 if unit == "percent" else None)
     panel["fieldConfig"]["defaults"]["thresholds"] = levels or thresholds(("text", None))
     panel["fieldConfig"]["defaults"]["color"] = {"mode": "thresholds"}
     panel["options"]["colorMode"] = "background" if levels else "none"
+    panel["options"]["graphMode"] = "area" if sparkline else "none"
     panel["description"] = description
+    return panel
+
+
+def guide_lines(panel: dict, levels: dict | None = None) -> dict:
+    """Draw dashed warning/critical guide lines on a percentage time series."""
+    panel["fieldConfig"]["defaults"]["thresholds"] = levels or LOAD_THRESHOLDS
+    panel["fieldConfig"]["defaults"]["custom"]["thresholdsStyle"] = {"mode": "dashed"}
+    return panel
+
+
+def stacked(panel: dict) -> dict:
+    panel["fieldConfig"]["defaults"]["custom"]["stacking"] = {"mode": "normal", "group": "A"}
+    panel["fieldConfig"]["defaults"]["custom"]["fillOpacity"] = 25
     return panel
 
 
@@ -273,14 +292,25 @@ from(bucket: "firewalls")
 
 
 def current_value(measurement: str, field: str, label: str, extra: str = "") -> str:
+    """Last 30 minutes of a metric, one point per minute, worst series per minute.
+
+    The stat tile reduces this to the latest point and draws the rest as a
+    sparkline, so a spike a few minutes ago is still visible at a glance.
+    ``field`` may be a Flux regex literal such as ``/^(a|b)$/`` to take the
+    worst value across several fields.
+    """
+    field_filter = f"r._field =~ {field}" if field.startswith("/") else f'r._field == "{field}"'
     return f'''
 from(bucket: "firewalls")
-  |> range(start: -15m)
-  |> filter(fn: (r) => r._measurement == "{measurement}" and r.hostname == "${{hostname}}" and r._field == "{field}"{extra})
-  |> last()
-  |> group()
+  |> range(start: -30m)
+  |> filter(fn: (r) => r._measurement == "{measurement}" and r.hostname == "${{hostname}}" and {field_filter}{extra})
+  |> map(fn: (r) => ({{ r with _value: float(v: r._value) }}))
+  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)
+  |> group(columns: ["_time"])
   |> max()
-  |> map(fn: (r) => ({{ _time: now(), _field: "{label}", _value: float(v: r._value) }}))
+  |> group()
+  |> sort(columns: ["_time"])
+  |> map(fn: (r) => ({{ _time: r._time, _field: "{label}", _value: float(v: r._value) }}))
 '''
 
 
@@ -288,8 +318,12 @@ def kpi_panels(y: int) -> list[dict]:
     return [
         kpi(3001, "DP CPU (avg)", current_value("paloalto_api_dataplane_cpu", "cpu_pct", "DP CPU", ' and r.core == "average"'), 0, y, "percent",
             levels=LOAD_THRESHOLDS, description="Highest per-dataplane average across all cores. This is the value SNMP reports."),
-        kpi(3002, "Hottest DP Core", current_value("paloalto_api_dataplane_cpu", "cpu_pct", "Hottest core", ' and r.core != "average"'), 3, y, "percent",
-            levels=LOAD_THRESHOLDS, description="Busiest individual dataplane core. A high value with a lower average reveals imbalance or saturated cores hidden by the average."),
+        kpi(3002, "Hottest DP Core", current_value("paloalto_api_dataplane_cpu", "/^cpu_(max_)?pct$/", "Hottest core", ' and r.core != "average"'), 3, y, "percent",
+            levels=LOAD_THRESHOLDS, description=(
+                "Busiest individual dataplane core. Uses the per-core peak within each minute (cpu_max_pct) when the collector "
+                "provides it and falls back to the per-core one-minute average (cpu_pct): both fields are merged and the highest "
+                "value per minute wins. A high value with a lower average reveals imbalance or saturated cores hidden by the average."
+            )),
         kpi(3003, "MP CPU", current_value("paloalto_api_management", "mp_cpu_pct", "MP CPU"), 6, y, "percent", levels=LOAD_THRESHOLDS),
         kpi(3004, "MP RAM", current_value("paloalto_api_management", "memory_used_pct", "MP RAM"), 9, y, "percent",
             levels=thresholds(("green", None), ("#EAB839", 85), ("red", 95))),
@@ -299,14 +333,16 @@ def kpi_panels(y: int) -> list[dict]:
         kpi(3007, "CPS", current_value("paloalto_api_sessions", "cps", "CPS"), 18, y, "cps"),
         kpi(3008, "Throughput (In + Out)", f'''
 from(bucket: "firewalls")
-  |> range(start: -5m)
+  |> range(start: -30m)
   |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${{hostname}}" and {PHYSICAL} and r._field =~ /^(in|out)_octets$/)
   |> derivative(unit: 1s, nonNegative: true)
-  |> last()
-  |> group()
+  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)
+  |> group(columns: ["_time"])
   |> sum()
-  |> map(fn: (r) => ({{ _time: now(), _field: "Throughput", _value: r._value * 8.0 }}))
-''', 21, y, "bps", description="Sum of physical Ethernet In and Out rates from hardware octet counters."),
+  |> group()
+  |> sort(columns: ["_time"])
+  |> map(fn: (r) => ({{ _time: r._time, _field: "Throughput", _value: r._value * 8.0 }}))
+''', 21, y, "bps", description="Sum of physical Ethernet In and Out rates from hardware octet counters, with a 30-minute sparkline."),
     ]
 
 
@@ -350,7 +386,7 @@ join(tables: {{rate: rates, link: speed}}, on: ["interface"])
         override("peak_pct", custom__hidden=True),
     ]
     return [
-        percent_range(timeseries(2, "CPU MP / DP", '''
+        guide_lines(percent_range(timeseries(2, "CPU MP / DP", '''
 management = from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_management" and r.hostname == "${hostname}" and r._field == "mp_cpu_pct")
@@ -369,17 +405,23 @@ hottest = from(bucket: "firewalls")
   |> map(fn: (r) => ({ r with _field: r.dataplane + " hottest core" }))
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
-union(tables: [management, averages, hottest])
+peaks = from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r._field == "cpu_max_pct" and r.core != "average")
+  |> map(fn: (r) => ({ r with _field: r.dataplane + " hottest core (peak)", _value: float(v: r._value) }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
+union(tables: [management, averages, hottest, peaks])
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 8, 12, 10, "percent", "Management-plane CPU, the all-core average of every dataplane (equivalent to SNMP) and the busiest core of every dataplane. Per-core curves are in the repeated Dataplane rows.")),
-        percent_range(timeseries(3, "MP RAM Usage", '''
+''', 0, 8, 12, 10, "percent", "Management-plane CPU, the all-core average of every dataplane (equivalent to SNMP), the busiest core of every dataplane (one-minute average) and its peak within the minute. Dashed lines mark 70% and 90%. Per-core curves are in the repeated Dataplane rows."))),
+        guide_lines(percent_range(timeseries(3, "MP RAM Usage", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_management" and r.hostname == "${hostname}" and r._field == "memory_used_pct")
   |> map(fn: (r) => ({ r with _field: "MP RAM" }))
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-''', 12, 8, 12, 10, "percent")),
+''', 12, 8, 12, 10, "percent")), thresholds(("green", None), ("#EAB839", 85), ("red", 95))),
         timeseries(4, "Sessions", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -395,13 +437,13 @@ from(bucket: "firewalls")
   |> map(fn: (r) => ({ r with _field: "CPS" }))
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
 ''', 8, 18, 8, 7, "cps"),
-        percent_range(timeseries(6, "Session Utilization", '''
+        guide_lines(percent_range(timeseries(6, "Session Utilization", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_sessions" and r.hostname == "${hostname}" and r._field == "session_utilization_pct")
   |> map(fn: (r) => ({ r with _field: "Session utilization" }))
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-''', 16, 18, 8, 7, "percent")),
+''', 16, 18, 8, 7, "percent")), thresholds(("green", None), ("#EAB839", 80), ("red", 90))),
         timeseries(7, "Throughput Global Interfaces", f'''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -414,7 +456,7 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
 ''', 0, 25, 14, 10, "bps", "Total throughput calculated from PAN-OS hardware interface octet counters."),
         interface_load,
-        percent_range(timeseries(3011, "Dataplane Resource Pressure", '''
+        guide_lines(percent_range(timeseries(3011, "Dataplane Resource Pressure", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_resources" and r.hostname == "${hostname}" and r._field == "utilization_pct")
@@ -422,8 +464,18 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 35, 12, 8, "percent", "Worst dataplane for each resource-monitor resource: session table, packet buffers, packet descriptors and software tags. Buffer or descriptor pressure precedes packet drops.")),
-        timeseries(3012, "Global Drop Rate by Category", '''
+''', 0, 35, 8, 8, "percent", "Worst dataplane for each resource-monitor resource: session table, packet buffers, packet descriptors and software tags. Buffer or descriptor pressure precedes packet drops."))),
+        guide_lines(percent_range(timeseries(3013, "Ingress Backlog by Dataplane", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_ingress_backlogs" and r.hostname == "${hostname}" and r._field == "usage_pct")
+  |> map(fn: (r) => ({ r with _field: r.dataplane, _value: float(v: r._value) }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 8, 35, 8, 8, "percent", "Packet-processing ingress queue usage per dataplane from show running resource-monitor ingress-backlogs. 0% means no backlog; a sustained backlog means the dataplane cannot keep up and precedes buffer exhaustion and drops. Dashed lines mark 50% and 80%.")),
+            thresholds(("green", None), ("#EAB839", 50), ("red", 80))),
+        stacked(timeseries(3012, "Global Drop Rate by Category", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_counters" and r.hostname == "${hostname}" and r._field == "value" and r.severity == "drop")
@@ -433,8 +485,11 @@ from(bucket: "firewalls")
   |> group(columns: ["_time", "_field"])
   |> sum()
   |> group(columns: ["_field"])
-''', 12, 35, 12, 8, "pps", "Packets dropped per second by the dataplane, summed by PAN-OS counter category. Details are in the drop counter sections."),
+''', 16, 35, 8, 8, "pps", "Packets dropped per second by the dataplane, stacked by PAN-OS counter category so the total drop rate is the top of the stack. Details are in the drop counter sections.")),
     ]
+
+
+HA_LINK_FIELDS = "/^(ha1_status|ha2_status|link_monitoring|path_monitoring|state_reason|state_duration|local_priority|peer_priority|preemptive)$/"
 
 
 def ha_row() -> dict:
@@ -454,19 +509,47 @@ from(bucket: "firewalls")
         {"type": "regex", "options": {"pattern": "(?i)^standalone$", "result": {"color": "text", "index": 2}}},
         {"type": "regex", "options": {"pattern": "(?i)^(non-functional|suspended|tentative|initial|unknown)$", "result": {"color": "red", "index": 3}}},
     ]
-    return row(9006, "HA Role Changes", 0, [
-        timeline,
-        table(1007, "HA Synchronization", '''
+    sync = table(1007, "HA Synchronization", f'''
 from(bucket: "firewalls")
   |> range(start: -24h)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_ha" and r.hostname == "${hostname}")
+  |> filter(fn: (r) => r._measurement == "paloalto_api_ha" and r.hostname == "${{hostname}}" and r._field !~ {HA_LINK_FIELDS})
   |> last()
-  |> map(fn: (r) => ({ _field: r._field, _value: string(v: r._value), row: "HA" }))
+  |> map(fn: (r) => ({{ _field: r._field, _value: string(v: r._value), row: "HA" }}))
   |> group()
   |> pivot(rowKey: ["row"], columnKey: ["_field"], valueColumn: "_value")
   |> drop(columns: ["row"])
-''', 0, 6, 24, 4, "Local and peer state, peer connection, running-configuration and session-state synchronization from show high-availability state."),
-    ])
+''', 0, 6, 24, 4, "Local and peer state, peer connection, running-configuration and session-state synchronization from show high-availability state. Every other HA field the collector adds appears here automatically.")
+    sync["fieldConfig"]["overrides"] = [
+        override("enabled", displayName="HA enabled"),
+        override("mode", displayName="Mode"),
+        override("state", displayName="Local state"),
+        override("peer_state", displayName="Peer state"),
+        override("peer_connection", displayName="Peer connection"),
+        override("config_sync", displayName="Config sync"),
+        override("state_sync", displayName="Session sync"),
+    ]
+    links = table(1008, "HA Links and Monitoring", f'''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_ha" and r.hostname == "${{hostname}}" and r._field =~ {HA_LINK_FIELDS})
+  |> last()
+  |> map(fn: (r) => ({{ _field: r._field, _value: string(v: r._value), row: "HA" }}))
+  |> group()
+  |> pivot(rowKey: ["row"], columnKey: ["_field"], valueColumn: "_value")
+  |> drop(columns: ["row"])
+''', 0, 10, 24, 4, "HA1 control link and HA2 data link status, link and path monitoring, the reason and duration of the current state, and the election priorities and preemption from show high-availability all.")
+    links["fieldConfig"]["overrides"] = [
+        override("ha1_status", displayName="HA1 link"),
+        override("ha2_status", displayName="HA2 link"),
+        override("link_monitoring", displayName="Link monitoring"),
+        override("path_monitoring", displayName="Path monitoring"),
+        override("state_reason", displayName="State reason"),
+        override("state_duration", displayName="In state since"),
+        override("local_priority", displayName="Local priority"),
+        override("peer_priority", displayName="Peer priority"),
+        override("preemptive", displayName="Preemptive"),
+    ]
+    return row(9006, "HA Role Changes", 0, [timeline, sync, links])
 
 
 def interface_rows() -> list[dict]:
@@ -517,7 +600,7 @@ from(bucket: "firewalls")
   |> map(fn: (r) => ({ r with _field: if r._field == "in_errors" then "In Errors" else if r._field == "in_discards" then "In Discards" else "Out Errors" }))
   |> group(columns: ["_field"])
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 0, 24, 10, "ops", "Hardware ingress errors and discards plus MAC-level transmit errors from show counter interface all."), "interface", max_per_row=1),
+''', 0, 0, 24, 10, "pps", "Hardware ingress errors and discards plus MAC-level transmit errors from show counter interface all."), "interface", max_per_row=1),
         ]),
     ]
 
@@ -592,7 +675,7 @@ from(bucket: "firewalls")
 
 def dataplane_row() -> dict:
     return row(9002, "Dataplane ${dataplane}", 0, [
-        percent_range(timeseries(12, "CPU per Core - ${dataplane}", '''
+        guide_lines(percent_range(timeseries(12, "CPU per Core - ${dataplane}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r.core != "average" and r._field == "cpu_pct")
@@ -600,7 +683,7 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 0, 12, 10, "percent", "One repeated row is created for every dataplane returned by PAN-OS.")),
+''', 0, 0, 12, 10, "percent", "One repeated row is created for every dataplane returned by PAN-OS."))),
         percent_range(timeseries(13, "Resource Utilization - ${dataplane}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -610,7 +693,7 @@ from(bucket: "firewalls")
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
 ''', 12, 0, 12, 10, "percent", "Session, packet-buffer, packet-descriptor and software-tag pressure reported by resource-monitor.")),
-        percent_range(timeseries(3201, "CPU Summary - ${dataplane}", '''
+        guide_lines(percent_range(timeseries(3201, "CPU Summary - ${dataplane}", '''
 cores = from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r._field == "cpu_pct")
@@ -629,9 +712,15 @@ hottest = cores
   |> map(fn: (r) => ({ r with _field: "Hottest core" }))
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
-union(tables: [average, active, hottest])
+peak = from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r._field == "cpu_max_pct" and r.core != "average")
+  |> map(fn: (r) => ({ r with _field: "Hottest core (peak)", _value: float(v: r._value) }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
+union(tables: [average, active, hottest, peak])
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 10, 12, 12, "percent", "The all-core average matches SNMP. Cores reporting 0% (not used for packet processing) are excluded from the active-core average, which shows the real load of the packet-processing cores.")),
+''', 0, 10, 12, 12, "percent", "The all-core average matches SNMP. Cores reporting 0% (not used for packet processing) are excluded from the active-core average, which shows the real load of the packet-processing cores. Hottest core is the busiest one-minute average; the peak series is the highest per-core value sampled within each minute."))),
         status_history(3202, "Core Load Map - ${dataplane}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -732,6 +821,121 @@ join(tables: {i: increases, d: descriptions}, on: ["counter"])
     ]
 
 
+def raid_table(panel_id: int, x: int, y: int, w: int, h: int) -> dict:
+    panel = table(panel_id, "RAID", '''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_raid" and r.hostname == "${hostname}" and (r._field == "status" or r._field == "healthy"))
+  |> group(columns: ["disk", "_field"])
+  |> last()
+  |> map(fn: (r) => ({ disk: r.disk, _field: r._field, _value: string(v: r._value) }))
+  |> group()
+  |> pivot(rowKey: ["disk"], columnKey: ["_field"], valueColumn: "_value")
+  |> keep(columns: ["disk", "status", "healthy"])
+  |> sort(columns: ["disk"])
+''', x, y, w, h, "Disk pair state from show system raid detail, on platforms with a RAID log disk (PA-5200/5400/5500/7000 Series).")
+    panel["fieldConfig"]["overrides"] = [
+        override("disk", displayName="Disk"),
+        override("status", displayName="Status"),
+        override("healthy", displayName="Healthy", custom__cellOptions={"type": "color-background"}, mappings=[
+            {"type": "value", "options": {"true": {"text": "Healthy", "color": "green", "index": 0},
+                                          "false": {"text": "Degraded", "color": "red", "index": 1}}},
+        ]),
+    ]
+    return panel
+
+
+def logging_row(*, raid: bool) -> dict:
+    """Log pipeline, management daemons, content versions, RAID and GlobalProtect users."""
+    rate_axis = {"axisLabel": "logs/s"}
+    log_rate = timeseries(3501, "Log Rate", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_logging" and r.hostname == "${hostname}" and r._field =~ /_rate$/)
+  |> map(fn: (r) => ({ r with _field: strings.replaceAll(v: strings.trimSuffix(v: r._field, suffix: "_rate"), t: "_", u: " "), _value: float(v: r._value) }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 0, 0, 12, 9, "short", "Logs per second reported by the management-plane log receiver (debug log-receiver statistics): incoming, written and forwarded.")
+    log_rate["fieldConfig"]["defaults"]["custom"].update(rate_axis)
+    discards = timeseries(3502, "Logs Discarded (rate)", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_logging" and r.hostname == "${hostname}" and r._field =~ /discard|dropped/ and r._field !~ /_rate$/)
+  |> derivative(unit: 1s, nonNegative: true)
+  |> map(fn: (r) => ({ r with _field: strings.replaceAll(v: r._field, t: "_", u: " ") }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 12, 0, 12, 9, "short", "Rate of logs the firewall discarded or dropped, from cumulative logging counters. Any sustained value means logs are lost before reaching disk or the log collector.")
+    discards["fieldConfig"]["defaults"]["custom"].update(rate_axis)
+    versions = table(3503, "Content Versions", '''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_system" and r.hostname == "${hostname}" and r._field =~ /^(app_version|threat_version|av_version|wildfire_version|url_filtering_version|device_certificate_status|operational_mode|multi_vsys)$/)
+  |> group(columns: ["_field"])
+  |> last()
+  |> map(fn: (r) => ({ _field: r._field, _value: string(v: r._value), row: "System" }))
+  |> group()
+  |> pivot(rowKey: ["row"], columnKey: ["_field"], valueColumn: "_value")
+  |> drop(columns: ["row"])
+''', 0, 9, 24, 4, "Installed content and signature versions, device certificate status, operational mode and multi-VSYS state from show system info.")
+    versions["fieldConfig"]["overrides"] = [
+        override("app_version", displayName="App-ID"),
+        override("threat_version", displayName="Threat"),
+        override("av_version", displayName="Antivirus"),
+        override("wildfire_version", displayName="WildFire"),
+        override("url_filtering_version", displayName="URL filtering"),
+        override("device_certificate_status", displayName="Device certificate"),
+        override("operational_mode", displayName="Operational mode"),
+        override("multi_vsys", displayName="Multi-VSYS"),
+    ]
+    software = 'r._measurement == "paloalto_api_software" and r.hostname == "${hostname}"'
+    not_running = kpi(3504, "Processes Not Running", f'''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => {software} and r._field == "running")
+  |> group(columns: ["process"])
+  |> last()
+  |> group()
+  |> map(fn: (r) => ({{ _time: now(), _field: "Not running", _value: if string(v: r._value) == "true" or string(v: r._value) == "1" then 0 else 1 }}))
+  |> sum()
+''', 0, 13, "short", levels=thresholds(("green", None), ("red", 1)),
+        description="Management-plane daemons from show system software status that are not running.", sparkline=False, w=4)
+    processes = table(3505, "Management Processes Not Running", f'''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => {software} and (r._field == "running" or r._field == "status"))
+  |> group(columns: ["process", "_field"])
+  |> last()
+  |> map(fn: (r) => ({{ process: r.process, _field: r._field, _value: string(v: r._value) }}))
+  |> group()
+  |> pivot(rowKey: ["process"], columnKey: ["_field"], valueColumn: "_value")
+  |> filter(fn: (r) => exists r.running and r.running != "true" and r.running != "1")
+  |> keep(columns: ["process", "status"])
+  |> sort(columns: ["process"])
+''', 4, 13, 10 if raid else 20, 8, "Only daemons that are not running are listed; an empty table means every monitored process is up.")
+    processes["fieldConfig"]["overrides"] = [
+        override("process", displayName="Process"),
+        override("status", displayName="Status", custom__cellOptions={"type": "color-text"}, color={"mode": "fixed", "fixedColor": "red"}),
+    ]
+    gp_users = kpi(3506, "GP Users", current_value("paloalto_api_globalprotect", "current_users", "GP users", " and not exists r.gateway"), 0, 17, "short",
+                   description="Current GlobalProtect users on the firewall (total without the per-gateway breakdown).", w=4)
+    gp_series = timeseries(3507, "GlobalProtect Users", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_globalprotect" and r.hostname == "${hostname}" and r._field == "current_users")
+  |> map(fn: (r) => ({ r with _field: if exists r.gateway then "Gateway " + r.gateway else "Total", _value: float(v: r._value) }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 0, 21, 24, 8, "short", "Current GlobalProtect users: firewall total plus one series per gateway when the collector reports gateways.")
+    panels = [log_rate, discards, versions, not_running, processes]
+    if raid:
+        panels.append(raid_table(3508, 14, 13, 10, 8))
+    return row(9012, "Logging and Management Health", 0, [*panels, gp_users, gp_series])
+
+
 def management_row(*, sensors: bool) -> list[dict]:
     rows = [
         row(9005, "Advanced Resource Troubleshooting - Management Plane", 0, [
@@ -797,16 +1001,39 @@ from(bucket: "firewalls")
                  thresholds=thresholds(("green", None), ("#EAB839", 80), ("red", 90)), color={"mode": "thresholds"}),
     ]
     if sensors:
-        rows.append(row(9100, "Chassis and Environmental Sensors", 0, [
-            timeseries(20, "Environmental Sensor Values", '''
+        rows.append(sensor_row(9100, "Chassis and Environmental Sensors", (20, 21, 24, 25)))
+    return rows
+
+
+def sensor_row(row_id: int, title: str, ids: tuple[int, int, int, int]) -> dict:
+    """Temperatures, fan speeds, power sensor values and alarms, one panel each."""
+    temperatures, fans, power, alarms = ids
+    return row(row_id, title, 0, [
+        timeseries(temperatures, "Temperatures by Slot", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r._field =~ /^(degrees_c|rpm|watts|volts|amps|value)$/)
-  |> map(fn: (r) => ({ r with _field: r.sensor_type + " " + r.slot + " " + r.description + " " + r._field }))
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "thermal" and r._field == "degrees_c")
+  |> map(fn: (r) => ({ r with _field: r.slot + " " + r.description }))
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-''', 0, 0, 24, 11, "short", "Thermal, fan and power values appear when the platform exposes them."),
-            table(21, "Environmental Alarms", '''
+''', 0, 0, 12, 10, "celsius", "Thermal sensors from show system environmentals thermal."),
+        timeseries(fans, "Fan Speed by Slot", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "fan" and r._field == "rpm")
+  |> map(fn: (r) => ({ r with _field: r.slot + " " + r.description }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+''', 12, 0, 12, 10, "rpm", "Fan speeds from show system environmentals fans."),
+        timeseries(power, "Power Sensor Values", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "power" and r._field =~ /^(watts|volts|amps|value)$/)
+  |> map(fn: (r) => ({ r with _field: r.slot + " " + r.description + " " + r._field }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+''', 0, 10, 12, 10, "short", "Power supply voltages, currents and wattage from show system environmentals power."),
+        table(alarms, "Environmental Alarms", '''
 from(bucket: "firewalls")
   |> range(start: -24h)
   |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r._field == "alarm")
@@ -815,9 +1042,94 @@ from(bucket: "firewalls")
   |> group()
   |> keep(columns: ["sensor_type", "slot", "description", "_value"])
   |> rename(columns: {_value: "alarm"})
-''', 0, 11, 24, 9),
-        ]))
-    return rows
+  |> sort(columns: ["alarm", "sensor_type", "slot"], desc: true)
+''', 12, 10, 12, 10, "Latest alarm flag of every sensor; alarmed sensors sort first."),
+    ])
+
+
+def chassis_health_panels(y: int) -> list[dict]:
+    """Uncollapsed chassis strip: card counts, power budget, hottest sensor, alarms and a slot-state timeline."""
+    status = 'r._measurement == "paloalto_api_chassis_status" and r.hostname == "${hostname}" and r._field == "status"'
+    cards_up = kpi(2030, "Cards Up", f'''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => {status})
+  |> group(columns: ["slot"])
+  |> last()
+  |> group()
+  |> map(fn: (r) => ({{ _time: now(), _field: "Cards up", _value: if r._value =~ /(?i)^up/ then 1 else 0 }}))
+  |> sum()
+''', 0, y, "short", levels=thresholds(("green", None)), description="Slots whose card reports an Up status in show chassis status.", sparkline=False, w=4)
+    cards_issue = kpi(2031, "Cards Not Up", f'''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => {status})
+  |> group(columns: ["slot"])
+  |> last()
+  |> group()
+  |> map(fn: (r) => ({{ _time: now(), _field: "Cards not up", _value: if r._value =~ /(?i)^(up|empty|absent|not present)/ then 0 else 1 }}))
+  |> sum()
+''', 4, y, "short", levels=thresholds(("green", None), ("red", 1)), description="Installed cards whose status is not Up (down, booting, failed, disabled). Empty slots are ignored.", sparkline=False, w=4)
+    power_pct = kpi(2032, "Power Budget Used", '''
+from(bucket: "firewalls")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_chassis_power" and r.hostname == "${hostname}" and r.component == "power_summary" and (r._field == "used_w" or r._field == "provided_w"))
+  |> last()
+  |> group()
+  |> pivot(rowKey: ["hostname"], columnKey: ["_field"], valueColumn: "_value")
+  |> filter(fn: (r) => exists r.provided_w and exists r.used_w and float(v: r.provided_w) > 0.0)
+  |> map(fn: (r) => ({ _time: now(), _field: "Power used", _value: float(v: r.used_w) / float(v: r.provided_w) * 100.0 }))
+''', 8, y, "percent", levels=thresholds(("green", None), ("#EAB839", 80), ("red", 90)), description="Power used divided by power provided from show chassis power.", sparkline=False, w=4)
+    hottest = kpi(2033, "Hottest Sensor", '''
+from(bucket: "firewalls")
+  |> range(start: -30m)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "thermal" and r._field == "degrees_c")
+  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)
+  |> group(columns: ["_time"])
+  |> max()
+  |> group()
+  |> sort(columns: ["_time"])
+  |> map(fn: (r) => ({ _time: r._time, _field: "Hottest sensor", _value: float(v: r._value) }))
+''', 12, y, "celsius", levels=thresholds(("green", None), ("#EAB839", 65), ("red", 80)), description="Highest thermal sensor reading across every slot, with a 30-minute sparkline.", w=4)
+    alarms = kpi(2034, "Sensor Alarms", '''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r._field == "alarm")
+  |> group(columns: ["sensor_type", "slot", "description"])
+  |> last()
+  |> group()
+  |> map(fn: (r) => ({ _time: now(), _field: "Sensor alarms", _value: if r._value =~ /(?i)^(true|yes|1|on|alarm)/ then 1 else 0 }))
+  |> sum()
+''', 16, y, "short", levels=thresholds(("green", None), ("red", 1)), description="Thermal, fan and power sensors currently reporting an alarm.", sparkline=False, w=4)
+    fans_min = kpi(2035, "Slowest Fan", '''
+from(bucket: "firewalls")
+  |> range(start: -30m)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "fan" and r._field == "rpm")
+  |> aggregateWindow(every: 1m, fn: min, createEmpty: false)
+  |> group(columns: ["_time"])
+  |> min()
+  |> group()
+  |> sort(columns: ["_time"])
+  |> map(fn: (r) => ({ _time: r._time, _field: "Slowest fan", _value: float(v: r._value) }))
+''', 20, y, "rpm", description="Lowest fan speed across every slot; a fan reporting 0 rpm has stopped.", w=4)
+    timeline = state_timeline(2036, "Slot State", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_chassis_status" and r.hostname == "${hostname}" and r._field == "status")
+  |> map(fn: (r) => ({ r with _field: "Slot " + r.slot }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', y)
+    timeline["gridPos"] = {"h": 5, "w": 24, "x": 0, "y": y + 4}
+    timeline["description"] = "Operational state of every slot from show chassis status. Green is Up, grey is empty, blue is disabled, red is any other state."
+    timeline["fieldConfig"]["defaults"]["mappings"] = [
+        {"type": "regex", "options": {"pattern": "(?i)^up.*", "result": {"color": "green", "index": 0}}},
+        {"type": "regex", "options": {"pattern": "(?i)^(empty|absent|not present).*", "result": {"color": "text", "index": 1}}},
+        {"type": "regex", "options": {"pattern": "(?i)^disabled.*", "result": {"color": "blue", "index": 2}}},
+        {"type": "regex", "options": {"pattern": "(?i)^(?!(up|empty|absent|not present|disabled)).+", "result": {"color": "red", "index": 3}}},
+    ]
+    return [cards_up, cards_issue, power_pct, hottest, alarms, fans_min, timeline]
 
 
 def chassis_rows() -> list[dict]:
@@ -843,6 +1155,7 @@ from(bucket: "firewalls")
   |> pivot(rowKey: ["slot", "card_type"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["slot"])
 ''', 12, 0, 12, 11, "Operational state, role and configuration state from show chassis status."),
+            raid_table(2040, 0, 11, 24, 6),
         ]),
         row(9202, "Chassis Power", 0, [
             timeseries(2011, "Power by Component", '''
@@ -874,42 +1187,7 @@ from(bucket: "firewalls")
   |> keep(columns: ["_time", "_field", "_value"])
 ''', 0, 10, 24, 8, "watt", "Power provided, used and remaining, equivalent to the SNMP chassis power panel."),
         ]),
-        row(9204, "Thermal, Fans and Power Sensors", 0, [
-            timeseries(2015, "Temperatures by Slot", '''
-from(bucket: "firewalls")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "thermal" and r._field == "degrees_c")
-  |> map(fn: (r) => ({ r with _field: r.slot + " " + r.description }))
-  |> group(columns: ["_field"])
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-''', 0, 0, 12, 10, "celsius"),
-            timeseries(2016, "Fan Speed by Slot", '''
-from(bucket: "firewalls")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "fan" and r._field == "rpm")
-  |> map(fn: (r) => ({ r with _field: r.slot + " " + r.description }))
-  |> group(columns: ["_field"])
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-''', 12, 0, 12, 10, "rpm"),
-            timeseries(2017, "Power Sensor Values", '''
-from(bucket: "firewalls")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "power" and r._field =~ /^(watts|volts|amps|value)$/)
-  |> map(fn: (r) => ({ r with _field: r.slot + " " + r.description + " " + r._field }))
-  |> group(columns: ["_field"])
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-''', 0, 10, 12, 10, "short"),
-            table(2018, "Environmental Alarms", '''
-from(bucket: "firewalls")
-  |> range(start: -24h)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r._field == "alarm")
-  |> group(columns: ["sensor_type", "slot", "description"])
-  |> last()
-  |> group()
-  |> keep(columns: ["sensor_type", "slot", "description", "_value"])
-  |> rename(columns: {_value: "alarm"})
-''', 12, 10, 12, 10),
-        ]),
+        sensor_row(9204, "Thermal, Fans and Power Sensors", (2015, 2016, 2017, 2018)),
         row(9205, "Interfaces by Slot", 0, [
             timeseries(2019, "Throughput by Interface", f'''
 from(bucket: "firewalls")
@@ -1015,7 +1293,13 @@ def dashboard(*, title: str, uid: str, description: str, tags: list[str], versio
     }
 
 
-def shared_body(*, sensors: bool) -> list[dict]:
+def shared_body(*, sensors: bool, raid: bool) -> list[dict]:
+    """Collapsed sections common to both API dashboards.
+
+    RAID lives in the shared logging row on the standard dashboard (fixed
+    high-end appliances such as the PA-5500 Series also have a RAID log disk)
+    and in the Chassis Slot Inventory row on the chassis dashboard.
+    """
     return [
         ha_row(),
         *interface_rows(),
@@ -1023,6 +1307,7 @@ def shared_body(*, sensors: bool) -> list[dict]:
         dataplane_row(),
         session_row(),
         *counter_rows(),
+        logging_row(raid=raid),
         *management_row(sensors=sensors),
     ]
 
@@ -1038,7 +1323,7 @@ def add_imports(panels: list[dict]) -> list[dict]:
 
 
 def build_dashboard() -> dict:
-    panels = [*header_panels(), *kpi_panels(4), *overview_panels(), *shared_body(sensors=True)]
+    panels = [*header_panels(), *kpi_panels(4), *overview_panels(), *shared_body(sensors=True, raid=True)]
     hostname_query = '''
 import "influxdata/influxdb/schema"
 schema.tagValues(bucket: "firewalls", tag: "hostname", predicate: (r) => r._measurement == "paloalto_api_sessions", start: -30d)
@@ -1052,7 +1337,7 @@ schema.tagValues(bucket: "firewalls", tag: "hostname", predicate: (r) => r._meas
             "per-dataplane drill-down and API-only resource metrics."
         ),
         tags=["paloalto", "xml-api", "firewall", "performance"],
-        version=4,
+        version=5,
         panels=add_imports(stack_rows(panels)),
         hostname_query=hostname_query,
     )
@@ -1060,16 +1345,23 @@ schema.tagValues(bucket: "firewalls", tag: "hostname", predicate: (r) => r._meas
 
 def build_chassis_dashboard() -> dict:
     shared = offset_ids(
-        copy.deepcopy([*header_panels(), *kpi_panels(4), *overview_panels(), *shared_body(sensors=False)]),
+        copy.deepcopy([*header_panels(), *kpi_panels(4), *overview_panels(), *shared_body(sensors=False, raid=False)]),
         CHASSIS_ID_OFFSET,
     )
     overview = [panel for panel in shared if panel["type"] != "row"]
     body = [panel for panel in shared if panel["type"] == "row"]
     cpu = next(panel for panel in overview if panel["title"] == "CPU MP / DP")
     cpu["title"] = "CPU MP / DP by Slot"
+    # The chassis health strip sits directly under the load strip; everything
+    # below it moves down by its height.
+    health = chassis_health_panels(8)
+    health_height = max(panel["gridPos"]["y"] + panel["gridPos"]["h"] for panel in health) - 8
+    for panel in overview:
+        if panel["gridPos"]["y"] >= 8:
+            panel["gridPos"]["y"] += health_height
     # Chassis-specific sections come first because they are the reason to use
     # this dashboard; the shared sections follow in the standard order.
-    panels = [*overview, *chassis_rows(), *body]
+    panels = [*overview, *health, *chassis_rows(), *body]
     hostname_query = '''
 from(bucket: "firewalls")
   |> range(start: -30d)
@@ -1087,7 +1379,7 @@ from(bucket: "firewalls")
             "plus chassis slot inventory, live slot state and power when supported."
         ),
         tags=["paloalto", "xml-api", "chassis", "performance"],
-        version=2,
+        version=3,
         panels=add_imports(stack_rows(panels)),
         hostname_query=hostname_query,
     )

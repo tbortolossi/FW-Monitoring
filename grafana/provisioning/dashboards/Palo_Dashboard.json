@@ -632,7 +632,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "pps",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -995,7 +995,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "pps",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -1051,7 +1051,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "pps",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -1121,7 +1121,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "pps",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -1177,7 +1177,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "pps",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -1233,7 +1233,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "pps",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -1289,7 +1289,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "pps",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -1359,14 +1359,36 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
+              "unit": "percent",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
                 "lineWidth": 1,
                 "fillOpacity": 8,
                 "spanNulls": false,
-                "showPoints": "never"
+                "showPoints": "never",
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
               }
             },
             "overrides": []
@@ -1401,13 +1423,13 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and r._field == \"storage_usage_pct\")\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(management|memory|disk|filesystem|tmp|var|opt|root|boot|log)/ and r.storage_descr !~ /(?i)(data processor|hardware packet buffers|packet buffers|packet buffer|packet descriptors|on-chip|descriptor)/)\n  |> map(fn: (r) => ({ r with _field: r.storage_descr + \" [hrStorage \" + string(v: r.storage_index) + \"]\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and (r._field == \"storage_usage_pct\" or r._field == \"storage_used\" or r._field == \"storage_size\"))\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(management|memory|disk|filesystem|tmp|var|opt|root|boot|log)/ and r.storage_descr !~ /(?i)(data processor|hardware packet buffers|packet buffers|packet buffer|packet descriptors|on-chip|descriptor)/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"storage_index\", \"storage_descr\"])\n  |> pivot(rowKey: [\"_time\", \"storage_index\", \"storage_descr\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> filter(fn: (r) => exists r.storage_usage_pct or (exists r.storage_used and exists r.storage_size))\n  |> map(fn: (r) => ({\n    _time: r._time,\n    _field: r.storage_descr + \" [hrStorage \" + string(v: r.storage_index) + \"]\",\n    _value: if exists r.storage_usage_pct then float(v: r.storage_usage_pct) else if r.storage_size > 0.0 then r.storage_used / r.storage_size * 100.0 else 0.0\n  }))\n  |> group(columns: [\"_field\"])",
               "refId": "A"
             }
           ],
           "title": "Management Plane Storage Usage",
           "type": "timeseries",
-          "description": "Management-plane memory and filesystem hrStorage usage. Dataplane packet buffers are shown separately."
+          "description": "Usage of each hrStorage pool. Uses panhrStorageUsage when the firewall exposes it (PAN-OS 11.2+) and falls back to hrStorageUsed / hrStorageSize otherwise, so the panel stays populated when the optional 11.2 tables are disabled. Dashed lines mark 80% and 90%."
         },
         {
           "datasource": {
@@ -1626,7 +1648,29 @@
                 "lineWidth": 1,
                 "fillOpacity": 8,
                 "spanNulls": false,
-                "showPoints": "never"
+                "showPoints": "never",
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
               }
             },
             "overrides": []
@@ -1662,13 +1706,13 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and r._field == \"storage_usage_pct\")\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(data processor|hardware packet buffers|packet buffers|packet buffer|packet descriptors|on-chip|descriptor)/)\n  |> map(fn: (r) => ({ r with _field: r.storage_descr + \" [hrStorage \" + string(v: r.storage_index) + \"]\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and (r._field == \"storage_usage_pct\" or r._field == \"storage_used\" or r._field == \"storage_size\"))\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)(data processor|hardware packet buffers|packet buffers|packet buffer|packet descriptors|on-chip|descriptor)/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"storage_index\", \"storage_descr\"])\n  |> pivot(rowKey: [\"_time\", \"storage_index\", \"storage_descr\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> filter(fn: (r) => exists r.storage_usage_pct or (exists r.storage_used and exists r.storage_size))\n  |> map(fn: (r) => ({\n    _time: r._time,\n    _field: r.storage_descr + \" [hrStorage \" + string(v: r.storage_index) + \"]\",\n    _value: if exists r.storage_usage_pct then float(v: r.storage_usage_pct) else if r.storage_size > 0.0 then r.storage_used / r.storage_size * 100.0 else 0.0\n  }))\n  |> group(columns: [\"_field\"])",
               "refId": "A"
             }
           ],
           "title": "Data Plane Buffer Usage",
           "type": "timeseries",
-          "description": "Dataplane packet buffer, descriptor, and data-processor pool usage from HOST-RESOURCES hrStorageTable."
+          "description": "Usage of each hrStorage pool. Uses panhrStorageUsage when the firewall exposes it (PAN-OS 11.2+) and falls back to hrStorageUsed / hrStorageSize otherwise, so the panel stays populated when the optional 11.2 tables are disabled. Dashed lines mark 70% and 90%; sustained packet-buffer pressure precedes drops."
         },
         {
           "datasource": {
