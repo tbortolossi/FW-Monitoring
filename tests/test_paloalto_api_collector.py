@@ -20,6 +20,9 @@ from telegraf.paloalto_api_collector import (
     parse_ha_state,
     parse_interface_counters,
     parse_interface_status,
+    parse_logical_interface_counters,
+    interface_context,
+    parse_session_meter,
     parse_management_resources,
     parse_management_processes,
     parse_sessions,
@@ -178,7 +181,8 @@ class CollectorParsingTests(unittest.TestCase):
             "<result><hw>"
             "<entry><name>ethernet1/1</name><ibytes>112633947248</ibytes>"
             "<obytes>31443272030</obytes><ipackets>110950488</ipackets>"
-            "<opackets>62988198</opackets><ierrors>2</ierrors><idrops>3</idrops></entry>"
+            "<opackets>62988198</opackets><ierrors>2</ierrors><idrops>3</idrops>"
+            "<port><tx-error>4</tx-error><link-down>1</link-down></port></entry>"
             "<entry><name>ethernet1/2</name><ibytes>0</ibytes><obytes>7528446</obytes></entry>"
             "</hw><ifnet><entry><name>ignored-cpu-counter</name><ibytes>999</ibytes></entry></ifnet>"
             "</result>"
@@ -195,6 +199,8 @@ class CollectorParsingTests(unittest.TestCase):
                         "out_packets": 62988198,
                         "in_errors": 2,
                         "in_discards": 3,
+                        "out_errors": 4,
+                        "link_down_count": 1,
                     },
                 ),
                 ({"interface": "ethernet1/2"}, {"in_octets": 0, "out_octets": 7528446}),
@@ -224,6 +230,130 @@ class CollectorParsingTests(unittest.TestCase):
                     },
                 )
             ],
+        )
+
+    def test_session_meter_sums_dataplanes_per_vsys(self):
+        result = ET.fromstring(
+            "<result>"
+            "<entry><vsys>1</vsys><dp>s1dp0</dp><current>100</current><throttled>0</throttled><maximum>0</maximum></entry>"
+            "<entry><vsys>1</vsys><dp>s1dp1</dp><current>50</current><throttled>2</throttled><maximum>0</maximum></entry>"
+            "<entry><vsys>2</vsys><dp>s1dp0</dp><current>30</current><throttled>0</throttled><maximum>60</maximum></entry>"
+            "</result>"
+        )
+        self.assertEqual(
+            parse_session_meter(result),
+            [
+                ({"vsys": "vsys1"}, {"sessions_active": 150, "sessions_throttled": 2}),
+                (
+                    {"vsys": "vsys2"},
+                    {"sessions_active": 30, "sessions_throttled": 0, "sessions_max": 60, "session_utilization_pct": 50.0},
+                ),
+            ],
+        )
+
+    def test_logical_interface_counters_carry_zone_and_vsys(self):
+        status = parse_interface_status(ET.fromstring(
+            "<result><ifnet>"
+            "<entry><name>ethernet1/1.100</name><zone>trust</zone><vsys>1</vsys></entry>"
+            "<entry><name>tunnel.1</name><zone>N/A</zone><vsys>N/A</vsys></entry>"
+            "</ifnet></result>"
+        ))
+        context = interface_context(status)
+        self.assertEqual(context, {"ethernet1/1.100": {"zone": "trust", "vsys": "vsys1"}})
+        result = ET.fromstring(
+            "<result><hw><entry><name>ethernet1/1</name><ibytes>999</ibytes></entry></hw><ifnet><ifnet>"
+            "<entry><name>ethernet1/1.100</name><ibytes>1000</ibytes><obytes>2000</obytes>"
+            "<tcp_conn>40</tcp_conn><noroute>3</noroute><flowstate>1</flowstate></entry>"
+            "<entry><name>tunnel.1</name><ibytes>5</ibytes></entry>"
+            "</ifnet></ifnet></result>"
+        )
+        self.assertEqual(
+            parse_logical_interface_counters(result, context),
+            [
+                (
+                    {"interface": "ethernet1/1.100", "zone": "trust", "vsys": "vsys1"},
+                    {
+                        "in_octets": 1000,
+                        "out_octets": 2000,
+                        "drop_noroute": 3,
+                        "drop_flowstate": 1,
+                    },
+                ),
+                ({"interface": "tunnel.1"}, {"in_octets": 5}),
+            ],
+        )
+        limited = parse_logical_interface_counters(result, context, limit=1)
+        self.assertEqual([tags["interface"] for tags, _fields in limited], ["ethernet1/1.100"])
+
+    def test_interface_status_runs_before_counters_to_tag_logical_interfaces(self):
+        config = {"hostname": "fw", "host": "192.0.2.1", "api_key_env": "KEY"}
+        status = ET.fromstring(
+            "<result><ifnet><entry><name>ethernet1/2</name><zone>untrust</zone><vsys>1</vsys></entry></ifnet></result>"
+        )
+        counters = ET.fromstring(
+            "<result><hw/><ifnet><entry><name>ethernet1/2</name><ibytes>10</ibytes></entry></ifnet></result>"
+        )
+
+        def response_for(_config, command):
+            return counters if "<counter>" in command else status
+
+        with mock.patch("telegraf.paloalto_api_collector.request_xml", side_effect=response_for):
+            lines = collect_firewall(config, {"interfaces", "interface_status"})
+        self.assertIn(
+            "paloalto_api_logical_interfaces,hostname=fw,interface=ethernet1/2,vsys=vsys1,zone=untrust in_octets=10i",
+            lines,
+        )
+
+    def test_dos_counters_are_merged_without_duplicates(self):
+        config = {"hostname": "fw", "host": "192.0.2.1", "api_key_env": "KEY", "counter_limit": 16}
+        drops = ET.fromstring(
+            "<result><entry><name>flow_dos_red_tcp</name><value>5</value><severity>drop</severity>"
+            "<category>flow</category><aspect>dos</aspect></entry></result>"
+        )
+        dos = ET.fromstring(
+            "<result><entry><name>flow_dos_red_tcp</name><value>5</value><severity>drop</severity>"
+            "<category>flow</category><aspect>dos</aspect></entry>"
+            "<entry><name>flow_dos_syncookie_sent</name><value>7</value><severity>info</severity>"
+            "<category>flow</category><aspect>dos</aspect></entry></result>"
+        )
+        with mock.patch(
+            "telegraf.paloalto_api_collector.request_xml",
+            side_effect=lambda _config, command: dos if "<aspect>" in command else drops,
+        ):
+            lines = collect_firewall(config, {"counters"})
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(sum("flow_dos_red_tcp" in line for line in lines), 1)
+        self.assertTrue(any("flow_dos_syncookie_sent" in line for line in lines))
+
+    def test_unsupported_optional_command_is_disabled_after_first_failure(self):
+        config = {"hostname": "vm", "host": "192.0.2.1", "api_key_env": "KEY"}
+        with mock.patch(
+            "telegraf.paloalto_api_collector.request_xml",
+            side_effect=ApiError("show -> session -> meter is unexpected"),
+        ) as request, mock.patch("sys.stderr"):
+            collect_firewall(config, {"vsys"})
+            collect_firewall(config, {"vsys"})
+        self.assertEqual(request.call_count, 1)
+        self.assertIn("vsys", config["_unsupported"])
+
+    def test_ha_state_includes_peer_and_sync(self):
+        result = ET.fromstring(
+            "<result><enabled>yes</enabled><group><mode>Active-Passive</mode>"
+            "<local-info><state>active</state><state-sync>Complete</state-sync></local-info>"
+            "<peer-info><state>passive</state><conn-status>up</conn-status></peer-info>"
+            "<running-sync>synchronized</running-sync></group></result>"
+        )
+        self.assertEqual(
+            parse_ha_state(result),
+            {
+                "enabled": True,
+                "state": "active",
+                "mode": "Active-Passive",
+                "peer_state": "passive",
+                "peer_connection": "up",
+                "config_sync": "synchronized",
+                "state_sync": "Complete",
+            },
         )
 
     def test_ha_disabled_is_reported_as_standalone(self):

@@ -72,7 +72,64 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
         self.assertIn("^ethernet", global_throughput["targets"][0]["query"])
         self.assertIn("r.interface !~ /\\./", global_throughput["targets"][0]["query"])
 
+    def test_both_dashboards_share_snmp_parity_sections(self):
+        expected = {
+            "HA Role Changes",
+            "Interfaces",
+            "Interface Errors / Discards",
+            "VSYS ${vsys}",
+            "Data Plane Pressure and Key Drops",
+            "Filtered Global Drop Counters",
+            "Dataplane ${dataplane}",
+            "API Session Details",
+            "Zones, Logical Interfaces and Drop Reasons",
+            "Advanced Resource Troubleshooting - Management Plane",
+        }
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            titles = {panel["title"] for panel in dashboard["panels"]}
+            self.assertTrue(expected.issubset(titles), expected - titles)
+            for title in ("Sessions", "Global CPS", "Session Utilization", "Throughput Global Interfaces",
+                          "Hottest DP Core", "Interface Load (last 5 minutes)"):
+                self.assertIn(title, titles)
+            rows = {panel["title"]: panel for panel in dashboard["panels"] if panel["type"] == "row"}
+            self.assertEqual(rows["VSYS ${vsys}"]["repeat"], "vsys")
+            names = {item["name"] for item in dashboard["templating"]["list"]}
+            self.assertTrue({"interface", "dataplane", "vsys"}.issubset(names))
+
+    def test_panel_ids_are_unique_and_rows_are_ordered(self):
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            ids = []
+            stack = list(dashboard["panels"])
+            while stack:
+                panel = stack.pop()
+                ids.append(panel["id"])
+                stack.extend(panel.get("panels", []))
+            self.assertEqual(len(ids), len(set(ids)))
+            row_positions = [panel["gridPos"]["y"] for panel in dashboard["panels"] if panel["type"] == "row"]
+            self.assertEqual(row_positions, sorted(row_positions))
+            self.assertEqual(len(row_positions), len(set(row_positions)))
+
+    def test_cpu_overview_exposes_hottest_core(self):
+        panel = next(panel for panel in self.dashboard["panels"] if panel.get("title") == "CPU MP / DP")
+        query = panel["targets"][0]["query"]
+        self.assertIn('r.core == "average"', query)
+        self.assertIn('r.core != "average"', query)
+        self.assertIn("fn: max", query)
+
+    def test_flux_queries_import_strings_when_used(self):
+        stack = list(self.dashboard["panels"])
+        while stack:
+            panel = stack.pop()
+            stack.extend(panel.get("panels", []))
+            for item in panel.get("targets", []):
+                if "strings." in item["query"]:
+                    self.assertTrue(item["query"].startswith('import "strings"'))
+
     def test_dashboard_is_api_only(self):
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            serialized = json.dumps(dashboard)
+            self.assertNotIn("pan_system", serialized)
+            self.assertNotIn("ifHCInOctets", serialized)
         serialized = json.dumps(self.dashboard)
         self.assertIn("paloalto_api_interfaces", serialized)
         self.assertIn("paloalto_api_dataplane_resources", serialized)

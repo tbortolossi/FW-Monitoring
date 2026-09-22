@@ -21,7 +21,9 @@ Keep this dashboard API-only: calculate throughput from deltas of the per-interf
 
 Provide a separate high-end API chassis dashboard for PA-5200, PA-5400, PA-5500, PA-7000, and PA-7500 systems. Fixed multi-DP appliances use the same per-DP views. Detect modular PA-5450, PA-7050, PA-7080, and PA-7500 models from `show system info` before polling `show chassis inventory`, `show chassis status`, and `show chassis power`, avoiding unsupported calls on fixed appliances.
 
-Poll global counters with the firewall-side `severity drop` filter, retain active counters up to a configurable limit, and store cumulative values. Calculate deltas in the time-series layer instead of using PAN-OS `delta yes`, whose sampling state can be affected by other troubleshooting clients.
+Global and per-port throughput uses only the hardware counters. The logical `ifnet` counters from the same `show counter interface all` response, tagged with the zone and VSYS from `show interface all`, provide per-zone, per-VSYS, subinterface and tunnel throughput, plus per-reason drops, without an additional API call. The `ifnet` `tcp_conn`/`udp_conn` counters stay at zero on live firewalls and are not used, so the API has no per-zone or per-VSYS CPS. Per-VSYS sessions come from `show session meter`.
+
+Poll global counters with the firewall-side `severity drop` filter, plus an `aspect dos` filter for SYN-cookie and block-table counters, retain active counters up to a configurable limit, and store cumulative values. Calculate deltas in the time-series layer instead of using PAN-OS `delta yes`, whose sampling state can be affected by other troubleshooting clients.
 
 ## Consequences
 

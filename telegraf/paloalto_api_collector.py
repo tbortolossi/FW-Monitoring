@@ -27,6 +27,7 @@ from pathlib import Path
 
 SYSTEM_INFO_COMMAND = "<show><system><info></info></system></show>"
 SESSION_COMMAND = "<show><session><info></info></session></show>"
+SESSION_METER_COMMAND = "<show><session><meter></meter></session></show>"
 MANAGEMENT_COMMAND = "<show><system><resources></resources></system></show>"
 INTERFACE_STATUS_COMMAND = "<show><interface>all</interface></show>"
 HA_COMMAND = "<show><high-availability><state></state></high-availability></show>"
@@ -43,6 +44,12 @@ DATAPLANE_COMMAND = (
 )
 COUNTER_COMMAND = (
     "<show><counter><global><filter><severity>drop</severity></filter>"
+    "</global></counter></show>"
+)
+# DoS/zone-protection counters include informational SYN-cookie counters and
+# block-table gauges that the severity=drop filter does not return.
+COUNTER_DOS_COMMAND = (
+    "<show><counter><global><filter><aspect>dos</aspect></filter>"
     "</global></counter></show>"
 )
 INTERFACE_COMMAND = "<show><counter><interface>all</interface></counter></show>"
@@ -68,6 +75,32 @@ PRIORITY_COUNTERS = {
     "tcp_drop_out_of_wnd",
     "tcp_drop_packet",
 }
+
+# Per-reason drop counters exposed for logical interfaces in the ifnet section
+# of ``show counter interface all``.
+LOGICAL_DROP_COUNTERS = (
+    "flowstate",
+    "noroute",
+    "noarp",
+    "noneigh",
+    "neighpend",
+    "nomac",
+    "zonechange",
+    "land",
+    "pod",
+    "teardrop",
+    "ipspoof",
+    "macspoof",
+    "icmp_frag",
+)
+
+# PAN-OS messages for commands that a platform or release does not implement.
+UNSUPPORTED_PATTERN = re.compile(
+    r"(?i)invalid syntax|not supported|unsupported|unknown command|is unexpected|is not a valid"
+)
+# Categories that some platforms or releases do not implement. They are
+# disabled for that firewall after PAN-OS rejects the command.
+OPTIONAL_CATEGORIES = {"vsys", "thermal", "fans", "power"}
 
 
 class ApiError(RuntimeError):
@@ -196,6 +229,43 @@ def parse_sessions(result: ET.Element) -> dict:
     if active is not None and maximum:
         fields["session_utilization_pct"] = float(active) / float(maximum) * 100.0
     return fields
+
+
+def _vsys_name(value: object) -> str:
+    """Normalize PAN-OS VSYS identifiers such as ``1`` to ``vsys1``."""
+    text = str(value or "").strip().lower()
+    if re.fullmatch(r"\d+", text):
+        return f"vsys{text}"
+    if re.fullmatch(r"vsys\d+", text):
+        return text
+    return ""
+
+
+def parse_session_meter(result: ET.Element) -> list[tuple[dict, dict]]:
+    """Return per-VSYS session counts summed across dataplanes."""
+    per_vsys = {}
+    for entry in result.iter():
+        if _local_name(entry.tag).lower() != "entry":
+            continue
+        vsys = _vsys_name(_entry_text(entry, "vsys", "vsys-id", "id") or entry.attrib.get("name"))
+        current = _number(_entry_text(entry, "current", "count", "num-active"))
+        if not vsys or current is None:
+            continue
+        fields = per_vsys.setdefault(vsys, {"sessions_active": 0, "sessions_throttled": 0})
+        fields["sessions_active"] += current
+        throttled = _number(_entry_text(entry, "throttled"))
+        if throttled is not None:
+            fields["sessions_throttled"] += throttled
+        # A zero maximum means that no VSYS session limit is configured.
+        maximum = _number(_entry_text(entry, "maximum", "max", "limit"))
+        if maximum:
+            fields["sessions_max"] = max(fields.get("sessions_max", 0), maximum)
+    points = []
+    for vsys, fields in sorted(per_vsys.items()):
+        if fields.get("sessions_max"):
+            fields["session_utilization_pct"] = float(fields["sessions_active"]) / float(fields["sessions_max"]) * 100.0
+        points.append(({"vsys": vsys}, fields))
+    return points
 
 
 def _result_text(result: ET.Element) -> str:
@@ -378,6 +448,27 @@ def parse_dataplane_utilization(result: ET.Element) -> list[tuple[dict, dict]]:
 
 
 def parse_global_counters(result: ET.Element, limit: int = 256) -> list[tuple[dict, dict]]:
+    return rank_global_counters(_global_counter_points(result), limit)
+
+
+def rank_global_counters(points: list[tuple[dict, dict]], limit: int = 256) -> list[tuple[dict, dict]]:
+    """Deduplicate counters by name and keep priority, then busiest, counters."""
+    unique = {}
+    for tags, fields in points:
+        unique.setdefault(tags["counter"], (tags, fields))
+    ranked = sorted(
+        unique.values(),
+        key=lambda point: (
+            point[0]["counter"] in PRIORITY_COUNTERS,
+            float(point[1].get("rate", 0)),
+            float(point[1]["value"]),
+        ),
+        reverse=True,
+    )
+    return ranked[:limit]
+
+
+def _global_counter_points(result: ET.Element) -> list[tuple[dict, dict]]:
     points = []
     for entry in result.iter():
         if _local_name(entry.tag).lower() != "entry":
@@ -400,15 +491,7 @@ def parse_global_counters(result: ET.Element, limit: int = 256) -> list[tuple[di
         if description:
             fields["description"] = description
         points.append((tags, fields))
-    points.sort(
-        key=lambda point: (
-            point[0]["counter"] in PRIORITY_COUNTERS,
-            float(point[1].get("rate", 0)),
-            float(point[1]["value"]),
-        ),
-        reverse=True,
-    )
-    return points[:limit]
+    return points
 
 
 def parse_interface_counters(result: ET.Element) -> list[tuple[dict, dict]]:
@@ -431,9 +514,71 @@ def parse_interface_counters(result: ET.Element) -> list[tuple[dict, dict]]:
             value = _number(entry.findtext(source))
             if value is not None:
                 fields[destination] = value
+        # MAC-level port statistics add egress errors and link flaps.
+        for source, destination in (("tx-error", "out_errors"), ("link-down", "link_down_count")):
+            value = _number(entry.findtext(f"port/{source}"))
+            if value is not None:
+                fields[destination] = value
         if fields:
             points.append(({"interface": interface}, fields))
     return points
+
+
+def parse_logical_interface_counters(
+    result: ET.Element, context: dict | None = None, limit: int = 512
+) -> list[tuple[dict, dict]]:
+    """Return cumulative ifnet counters for subinterfaces, tunnels and VLANs.
+
+    ``context`` maps interface names to the zone/VSYS tags learned from
+    ``show interface all`` so that Grafana can aggregate by zone and VSYS.
+    """
+    aliases = {
+        "ibytes": "in_octets",
+        "obytes": "out_octets",
+        "ipackets": "in_packets",
+        "opackets": "out_packets",
+        "ierrors": "in_errors",
+        "idrops": "in_discards",
+        **{reason: f"drop_{reason}" for reason in LOGICAL_DROP_COUNTERS},
+    }
+    context = context or {}
+    points = []
+    # PAN-OS nests logical counters as ifnet/ifnet/entry; accept the flat form too.
+    for entry in result.findall("./ifnet/ifnet/entry") or result.findall("./ifnet/entry"):
+        interface = (entry.findtext("name") or "").strip()
+        if not interface:
+            continue
+        fields = {}
+        for source, destination in aliases.items():
+            value = _number(entry.findtext(source))
+            if value is not None:
+                fields[destination] = value
+        if fields:
+            points.append(({"interface": interface, **context.get(interface, {})}, fields))
+    if len(points) > limit:
+        # Keep the busiest interfaces when a platform has very many logical interfaces.
+        points.sort(
+            key=lambda point: float(point[1].get("in_octets", 0)) + float(point[1].get("out_octets", 0)),
+            reverse=True,
+        )
+        points = points[:limit]
+    return points
+
+
+def interface_context(status_points: list[tuple[dict, dict]]) -> dict:
+    """Build zone/VSYS tags for logical counters from parsed interface status."""
+    context = {}
+    for tags, fields in status_points:
+        item = {}
+        zone = str(fields.get("zone", "")).strip()
+        if zone and zone.lower() not in {"n/a", "none", "(none)", "unknown", "(unknown)"}:
+            item["zone"] = zone
+        vsys = _vsys_name(fields.get("vsys"))
+        if vsys:
+            item["vsys"] = vsys
+        if item:
+            context[tags["interface"]] = item
+    return context
 
 
 def parse_interface_status(result: ET.Element) -> list[tuple[dict, dict]]:
@@ -478,6 +623,15 @@ def parse_ha_state(result: ET.Element) -> dict:
         fields["mode"] = mode
     if group:
         fields["group"] = group
+    for destination, path in (
+        ("peer_state", ".//peer-info/state"),
+        ("peer_connection", ".//peer-info/conn-status"),
+        ("config_sync", ".//running-sync"),
+        ("state_sync", ".//local-info/state-sync"),
+    ):
+        value = (result.findtext(path) or "").strip()
+        if value:
+            fields[destination] = value
     return fields
 
 
@@ -696,23 +850,41 @@ def line_protocol(measurement: str, tags: dict, fields: dict) -> str | None:
     return f"{_escape(measurement)}{tag_text} {','.join(encoded)}"
 
 
+def _is_unsupported(exc: Exception) -> bool:
+    return isinstance(exc, ApiError) and bool(UNSUPPORTED_PATTERN.search(str(exc)))
+
+
+def _collect_counters(config: dict) -> list[tuple[dict, dict]]:
+    """Merge severity=drop counters with DoS-aspect counters under one limit."""
+    points = _global_counter_points(request_xml(config, COUNTER_COMMAND))
+    unsupported = config.setdefault("_unsupported", set())
+    if "counters_dos" not in unsupported:
+        try:
+            points.extend(_global_counter_points(request_xml(config, COUNTER_DOS_COMMAND)))
+        except ApiError as exc:
+            if not _is_unsupported(exc):
+                raise
+            unsupported.add("counters_dos")
+            print(
+                f"paloalto-api [{config['hostname']}] counters_dos: disabled, not supported: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+    return rank_global_counters(points, int(config.get("counter_limit", 256)))
+
+
 def collect_firewall(config: dict, due: set[str]) -> list[str]:
     hostname = config["hostname"]
     output = []
     commands = {
         "sessions": (SESSION_COMMAND, parse_sessions, "paloalto_api_sessions"),
-        "interfaces": (INTERFACE_COMMAND, parse_interface_counters, "paloalto_api_interfaces"),
+        "vsys": (SESSION_METER_COMMAND, parse_session_meter, "paloalto_api_vsys"),
         "interface_status": (INTERFACE_STATUS_COMMAND, parse_interface_status, "paloalto_api_interfaces"),
         "ha": (HA_COMMAND, parse_ha_state, "paloalto_api_ha"),
         "storage": (STORAGE_COMMAND, parse_storage, "paloalto_api_storage"),
         "thermal": (THERMAL_COMMAND, lambda result: parse_environmentals(result, "thermal"), "paloalto_api_sensors"),
         "fans": (FAN_COMMAND, lambda result: parse_environmentals(result, "fan"), "paloalto_api_sensors"),
         "power": (POWER_COMMAND, lambda result: parse_environmentals(result, "power"), "paloalto_api_sensors"),
-        "counters": (
-            COUNTER_COMMAND,
-            lambda result: parse_global_counters(result, int(config.get("counter_limit", 256))),
-            "paloalto_api_counters",
-        ),
         "chassis_inventory": (
             CHASSIS_INVENTORY_COMMAND,
             parse_chassis_inventory,
@@ -730,11 +902,14 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
         ),
         "system": (SYSTEM_INFO_COMMAND, parse_system_info, "paloalto_api_system"),
     }
+    # interface_status runs before interfaces so logical counters get zone/VSYS
+    # tags from the first polling cycle.
     categories = (
         "system",
         "sessions",
-        "interfaces",
+        "vsys",
         "interface_status",
+        "interfaces",
         "management",
         "dataplane",
         "counters",
@@ -747,13 +922,25 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
         "chassis_status",
         "chassis_power",
     )
+    unsupported = config.setdefault("_unsupported", set())
     for category in categories:
-        if category not in due:
+        if category not in due or category in unsupported:
             continue
         if category.startswith("chassis_") and not config.get("_is_chassis", False):
             continue
         try:
-            if category == "management":
+            if category == "interfaces":
+                result = request_xml(config, INTERFACE_COMMAND)
+                parsed_sets = (
+                    ("paloalto_api_interfaces", parse_interface_counters(result)),
+                    (
+                        "paloalto_api_logical_interfaces",
+                        parse_logical_interface_counters(result, config.get("_interface_context")),
+                    ),
+                )
+            elif category == "counters":
+                parsed_sets = (("paloalto_api_counters", _collect_counters(config)),)
+            elif category == "management":
                 result = request_xml(config, MANAGEMENT_COMMAND)
                 parsed_sets = (
                     ("paloalto_api_management", [({}, parse_management_resources(result))]),
@@ -773,6 +960,8 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
                     config["_is_chassis"] = bool(
                         re.search(r"(^|[^0-9])(5450|7050|7080|7500)([^0-9]|$)", model)
                     )
+                elif category == "interface_status":
+                    config["_interface_context"] = interface_context(parsed)
                 parsed_sets = ((measurement, parsed if isinstance(parsed, list) else [({}, parsed)]),)
             for measurement, points in parsed_sets:
                 for extra_tags, fields in points:
@@ -780,6 +969,11 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
                     if line:
                         output.append(line)
         except Exception as exc:  # keep other categories and firewalls alive
+            if category in OPTIONAL_CATEGORIES and _is_unsupported(exc):
+                # Avoid logging the same unsupported command on every poll.
+                unsupported.add(category)
+                print(f"paloalto-api [{hostname}] {category}: disabled, not supported: {exc}", file=sys.stderr, flush=True)
+                continue
             print(f"paloalto-api [{hostname}] {category}: {exc}", file=sys.stderr, flush=True)
     return output
 
@@ -818,7 +1012,7 @@ def load_environment_file(path: Path) -> None:
 
 def run_once(configs: list[dict], categories: set[str] | None = None) -> int:
     selected = categories or {
-        "sessions", "interfaces", "interface_status", "management", "dataplane",
+        "sessions", "vsys", "interfaces", "interface_status", "management", "dataplane",
         "counters", "ha", "storage", "thermal", "fans", "power", "system",
         "chassis_inventory", "chassis_power",
         "chassis_status",
@@ -838,6 +1032,7 @@ def run_daemon(configs: list[dict]) -> int:
     schedules = {
         "sessions": lambda cfg: int(cfg.get("interval", 20)),
         "interfaces": lambda cfg: int(cfg.get("interval", 20)),
+        "vsys": lambda cfg: int(cfg.get("resource_interval", 60)),
         "interface_status": lambda cfg: int(cfg.get("resource_interval", 60)),
         "management": lambda cfg: int(cfg.get("resource_interval", 60)),
         "dataplane": lambda cfg: int(cfg.get("resource_interval", 60)),
