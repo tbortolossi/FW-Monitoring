@@ -10,6 +10,20 @@ Never include real firewall addresses, API keys, SNMP credentials, InfluxDB toke
 
 Security fixes are applied to the latest release. Operators should upgrade by following the documented backup and regeneration procedure in `README.md` rather than copying generated files between versions.
 
+## Deployment Exposure
+
+- InfluxDB is published on `127.0.0.1:8086` only. Grafana and Telegraf reach it over the internal Compose network, so the InfluxDB API and the admin token it accepts are not reachable from other hosts. Prefer an SSH tunnel for remote queries. If the port must be exposed, bind it to a specific address and restrict it with a host firewall or VPN.
+- Grafana is pinned to 13.2.2; 11.1.4 is out of support and affected by later CVEs, including CVE-2026-27876. Self sign-up, usage reporting, and update checks are disabled. Keep port 3000 on a trusted administration network or behind a TLS reverse proxy, and never expose it directly to the internet.
+- The Telegraf container runs as the unprivileged `telegraf` user (UID `999`) and needs only outbound SNMP and HTTPS to the firewalls.
+
+## Secrets Handling
+
+- Operator secrets live in `.env` (mode `0600`, enforced by the generator) and are referenced from `firewalls.yml` as `${VARIABLE}`. Neither file is committed.
+- Secrets are never passed on a command line. SNMP discovery pipes the credentials to its throwaway container as a Net-SNMP `snmp.conf` on stdin, so they do not appear in `ps`, `docker inspect`, or audit logs. PAN-OS API keys are sent in the `X-PAN-KEY` header, never in a URL.
+- Telegraf receives only the SNMP secrets and API keys it needs, through the generated `telegraf/paloalto-api.env` (mode `0600`, Compose `env_file`). Values are double-quoted, with backslash, double quote, and dollar sign escaped by a backslash, so no value can be altered or expanded by Docker Compose; values with line breaks or NUL bytes are rejected, and the error names the variable, never the value.
+- `telegraf/telegraf.conf` contains only variable references, and `.firewalls.generated.yml` redacts every credential.
+- Generator output, collector logs, and the API-key helper never print secret values.
+
 ## Automated Checks
 
 CI performs the following checks:

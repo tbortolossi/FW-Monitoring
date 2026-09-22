@@ -23,31 +23,40 @@ Keep changes aligned with that goal: simple install, clear configuration, reliab
 
 ## Repository Shape
 
-- `docker-compose.yaml`: InfluxDB, custom Telegraf image, and Grafana services.
-- `firewalls.yml`: user-facing inventory for Palo Alto and Fortinet devices.
-- `.firewalls.generated.yml`: generated inventory enriched from `firewalls.yml`; ignored by Git and safe to recreate.
-- `generate.py`: main Python generator. It checks Docker, prepares MIBs, enriches inventory, renders `telegraf/telegraf.conf`, builds Telegraf, and starts the stack.
+- `docker-compose.yaml`: InfluxDB (published on `127.0.0.1:8086` only), custom Telegraf image, and Grafana (pinned 13.2.2, rationale in the file) services, with healthchecks.
+- `firewalls.yml`: user-facing inventory for Palo Alto and Fortinet devices; `firewalls_example.yml` is the committed sample.
+- `.firewalls.generated.yml`: generated inventory enriched from `firewalls.yml`; credentials redacted, mode `0600`, ignored by Git and safe to recreate.
+- `generate.py`: main Python generator. It checks Docker, resolves `${VARIABLE}` references, runs SNMP discovery, enriches inventory, prepares MIBs, writes the API runtime files, renders `telegraf/telegraf.conf`, builds Telegraf, and starts the stack.
 - `generate.sh`: optional convenience wrapper that creates a local `.venv`, installs `requirements.txt`, and executes `generate.py`.
-- `telegraf/header.tmpl`: common Telegraf agent and InfluxDB output config.
-- `telegraf/inputs_paloalto.tmpl`: SNMP input template for Palo Alto devices.
-- `telegraf/inputs_fortinet.tmpl`: SNMP input template for Fortinet devices.
-- `telegraf/Dockerfile`: custom Telegraf image with Net-SNMP and vendor MIB support.
+- `paloalto_api_key.py`: PAN-OS API key helper; stores the key in `.env` (default `--storage env`) and writes an `${PALOALTO_API_KEY_<HOSTNAME>}` reference into `firewalls.yml`.
+- `telegraf/header.tmpl`: common Telegraf agent (20 s interval) and InfluxDB output config.
+- `telegraf/inputs_paloalto.tmpl`, `telegraf/inputs_fortinet.tmpl`: plain Jinja2 SNMP input templates (two instances per firewall, see below).
+- `telegraf/inputs_paloalto_api.tmpl`: `inputs.execd` block for the API collector.
+- `telegraf/paloalto_api_collector.py`: standard-library PAN-OS XML API collector (line protocol on stdout).
+- `telegraf/Dockerfile`: custom Alpine Telegraf 1.40.1 image with Net-SNMP, standard and vendor MIBs, and the collector; keeps UID `999`.
 - `telegraf/mibs/`: bundled vendor MIBs.
 - `grafana/provisioning/`: Grafana datasources and dashboards.
+- `scripts/build_paloalto_api_dashboard.py`: generates `Palo_API_Dashboard.json` and `Palo_API_Chassis_Dashboard.json`. Never hand-edit those two JSON files; edit the script and regenerate (CI checks for drift).
+- `tests/`: unittest suite (branch coverage floor in `.coveragerc`).
+- `docs/adr/`: architecture decision records.
 
 ## Important Behavior
 
-- `firewalls.yml` is the main operator-facing config file.
+- `firewalls.yml` is the main operator-facing config file. Secrets should be exact `${VARIABLE}` references resolved from `.env` or the process environment; direct values remain supported.
 - Supported vendors are currently `paloalto` and `fortinet`.
 - Palo Alto entries may omit `vendor`; templates and generation logic default missing vendor values to `paloalto`.
 - Palo Alto system metrics use the shared measurement `pan_system`; `hostname` is a tag. Do not reintroduce per-host measurement names, because dashboards must work with multiple firewalls declared in `firewalls.yml`.
 - Palo Alto VSYS metrics are important for multi-tenant or multi-context firewalls; keep the `vsys` measurement and prefer dashboards that can show global load plus per-VSYS sessions and CPS.
-- MIB comparison notes: `panIfTable` exists in PAN-OS 10.2+, `panhrStorageUsage` and PA cluster summary objects appear in 11.2+, and `panVsysTotalCps` plus `panInterfaceUtilizationTable` appear in 12.1+. `generate.py` performs best-effort Palo Alto SNMP discovery, then infers these flags from discovered or declared `panos_version` into `.firewalls.generated.yml`; keep the user-facing `firewalls.yml` simple unless an override is genuinely needed.
+- SNMP polling uses two `[[inputs.snmp]]` instances per firewall. Fast (agent interval, 20 s): `pan_system`/`fortinet_system` scalars, `interfaces`, processors, `vsys`, `pan_zones`, `pan_interfaces_cps`, `pan_interface_utilization`. Slow (`interval = "60s"`): `pan_global_counters` as scalar GET fields (the instance name keeps them in that measurement), `pan_hr_storage`, `pan_hr_devices`, `pan_pa_cluster`, ENTITY tables in chassis mode; Fortinet VDOMs, hardware sensors, HA members. Both use `max_repetitions = 25`. Measurement, field, and tag names are the dashboard contract; keep them unchanged.
+- MIB comparison notes: `panIfTable` exists in PAN-OS 10.2+, `panhrStorageUsage` and PA cluster summary objects appear in 11.2+, and `panVsysTotalCps` plus `panInterfaceUtilizationTable` appear in 12.1+. `generate.py` performs best-effort Palo Alto SNMP discovery, then infers `panos_10_2_metrics`, `panos_11_2_metrics`, `panos_12_metrics`, `vsys_total_cps`, `interface_utilization`, `chassis`, and `pan_entity_ext` into `.firewalls.generated.yml`. `enrich_inventory()` runs before and after discovery; flags it inferred are recomputed, values declared in `firewalls.yml` are never overwritten. `pa_cluster` is operator-only (default `false`) and gates `pan_pa_cluster`, because some PAN-OS releases stall `snmpd` on those objects. Keep the user-facing `firewalls.yml` simple unless an override is genuinely needed.
 - `generate.py` also performs best-effort Fortinet SNMP discovery and should prefer discovered `fortios_version`, serial, model, and VDOM presence over user-declared values.
+- SNMP discovery never puts credentials on a command line: `build_snmp_conf()` renders a Net-SNMP `snmp.conf` that is piped on stdin into the throwaway discovery container (`SNMPCONFPATH`). `SNMP_DISCOVERY_TIMEOUT` (default 2 s) and `SNMP_DISCOVERY=false` are the knobs. Keep it that way.
 - Keep `firewalls.yml` minimal. Chassis mode is normally inferred by `generate.py`; only document or use `chassis: true` as an advanced override when SNMP discovery cannot identify the platform.
-- Palo Alto HOST-RESOURCES tables are collected for all Palo Alto devices so multi-DP appliances such as PA-5200 Series can expose per-processor load. Chassis mode additionally enables ENTITY, ENTITY-SENSOR, and ENTITY-STATE polling in `telegraf/inputs_paloalto.tmpl`. Keep this table-based where possible because sensor and slot indexes vary by platform.
+- Palo Alto HOST-RESOURCES tables are collected for all Palo Alto devices so multi-DP appliances such as PA-5200 Series can expose per-processor load. Chassis mode additionally enables ENTITY, ENTITY-SENSOR, and ENTITY-STATE polling (with an `entity_name` tag) in `telegraf/inputs_paloalto.tmpl`. Keep this table-based where possible because sensor and slot indexes vary by platform.
 - SNMP v2c and SNMP v3 are both represented in `firewalls.yml`; preserve both paths when changing templates.
-- Generated Telegraf config is written to `telegraf/telegraf.conf`.
+- Generated Telegraf config is written to `telegraf/telegraf.conf`; it contains `$FIREWALL_SNMP_*` and API-key variable references, never secret values.
+- Runtime secrets go to `telegraf/paloalto-api.env` (mode `0600`, injected by Compose `env_file`). Encoding contract: `compose_environment_value()` in `generate.py` wraps each value in double quotes and prefixes `\`, `"` and `$` with a backslash; newlines and NUL are rejected with an error naming the field only. `load_environment_file()` in the collector must decode the same format (and still accept the legacy single-quoted one). Change both sides and their tests together.
+- Palo Alto XML API collector categories and schedules live in `CATEGORY_SCHEDULES`; `OPTIONAL_CATEGORIES` (`vsys`, `thermal`, `fans`, `power`, `ingress_backlogs`, `logging`, `globalprotect`, `software`, `raid`) are disabled per firewall after PAN-OS rejects the command. Chassis categories run only on PA-5450/7050/7080/7500; `raid` only on high-end or chassis models. Physical sensor and chassis power fields are always floats; counters stay integers. Do not change a field's type once written: InfluxDB rejects the new type until the shard rolls over.
 - Grafana uses InfluxDB Flux with the datasource UID currently set to `P951FEA4DE68E13C5`; avoid changing it casually because dashboards may depend on it.
 - Fortinet system metrics use the shared measurement `fortinet_system`; `hostname` is a tag. Do not reintroduce per-host measurement names, because dashboards must work with multiple firewalls declared in `firewalls.yml`.
 - Fortinet entries can set optional `model` and `cluster` values; the Fortinet template collects system, interface, VDOM, processor, hardware sensor, and HA member metrics while preserving `cpu_pct`, `mem_pct`, `sessions_active`, and the shared `interfaces` measurement expected by dashboards.
@@ -121,6 +130,10 @@ When Docker is available, also validate:
 docker compose ps
 docker compose logs --tail=100 telegraf
 ```
+
+Dashboard Flux queries can be checked against a running stack before editing JSON: InfluxDB listens on `127.0.0.1:8086` on the Docker host, so `docker compose exec influxdb influx query '<flux>'` (or the HTTP API with the local token) shows whether a query returns the expected tables for a real firewall.
+
+After changing `scripts/build_paloalto_api_dashboard.py`, regenerate both API dashboard JSON files with the script and run the dashboard tests.
 
 For dashboard or datasource changes, confirm Grafana starts and the datasource still targets:
 
