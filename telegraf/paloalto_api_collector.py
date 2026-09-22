@@ -124,6 +124,10 @@ UNSUPPORTED_PATTERN = re.compile(
     r"(?i)invalid syntax|not supported|unsupported|unknown command|is unexpected|is not a valid"
     r"|not authorized|unauthorized|permission denied|insufficient privilege|forbidden|access denied"
 )
+# ``show session meter`` lists every VSYS slot the platform can host, including
+# ones that are not configured; a VSYS-scoped command on such a slot fails with
+# this message.
+INVALID_VSYS_PATTERN = re.compile(r"(?i)valid vsys|invalid vsys|vsys .* does not exist")
 # Categories that some platforms or releases do not implement. They are
 # disabled for that firewall after PAN-OS rejects the command.
 OPTIONAL_CATEGORIES = {
@@ -205,7 +209,8 @@ def _result(root: ET.Element) -> ET.Element:
     return result
 
 
-def request_xml(config: dict, command: str) -> ET.Element:
+def request_xml(config: dict, command: str, vsys: str | None = None) -> ET.Element:
+    """Run an operational command; ``vsys`` scopes it to one virtual system."""
     key_name = config["api_key_env"]
     api_key = os.environ.get(key_name)
     if not api_key:
@@ -213,9 +218,12 @@ def request_xml(config: dict, command: str) -> ET.Element:
 
     host = config["host"]
     port = int(config.get("port", 443))
+    params = {"type": "op", "cmd": command}
+    if vsys:
+        params["vsys"] = vsys
     request = urllib.request.Request(
         f"https://{host}:{port}/api/",
-        data=urllib.parse.urlencode({"type": "op", "cmd": command}).encode(),
+        data=urllib.parse.urlencode(params).encode(),
         headers={"X-PAN-KEY": api_key, "Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
@@ -225,6 +233,13 @@ def request_xml(config: dict, command: str) -> ET.Element:
     try:
         with urllib.request.urlopen(request, timeout=float(config.get("timeout", 15)), context=context) as response:
             payload = response.read()
+    except urllib.error.HTTPError as exc:
+        # PAN-OS explains 4xx answers in the body ("You must specify a valid vsys").
+        try:
+            detail = exc.read().decode("utf-8", errors="replace").strip()
+        except Exception:  # pragma: no cover - body already consumed or unreadable
+            detail = ""
+        raise ApiError(f"request failed: HTTP {exc.code}: {detail or exc.reason}") from exc
     except (OSError, urllib.error.URLError) as exc:
         raise ApiError(f"request failed: {exc}") from exc
     try:
@@ -1220,12 +1235,59 @@ def _collect_counters(config: dict) -> list[tuple[dict, dict]]:
     return rank_global_counters(points, int(config.get("counter_limit", 256)))
 
 
+# Fields of a VSYS-scoped ``show session info`` that are specific to that VSYS.
+# ``sessions_active`` stays the dataplane-summed value of ``show session meter``
+# and ``sessions_max`` stays the VSYS session limit of the meter (``num-max``
+# in the scoped output is the platform limit).
+VSYS_SESSION_FIELDS = ("cps", "packet_rate_pps", "sessions_tcp", "sessions_udp", "sessions_icmp")
+
+
+def _collect_vsys(config: dict) -> list[tuple[dict, dict]]:
+    """Per-VSYS sessions from ``show session meter`` plus CPS, packet rate and
+    protocol counts from ``show session info`` scoped to each VSYS.
+
+    Unconfigured meter slots (PAN-OS answers "You must specify a valid vsys")
+    are dropped and probed again only every ``system_interval`` seconds.
+    """
+    points = parse_session_meter(request_xml(config, SESSION_METER_COMMAND))
+    unsupported = config.setdefault("_unsupported", set())
+    missing = config.setdefault("_missing_vsys", {})
+    recheck = float(config.get("system_interval", 3600))
+    now = time.monotonic()
+    result = []
+    for tags, fields in points:
+        vsys = tags["vsys"]
+        probed = missing.get(vsys)
+        if probed is not None and now - probed < recheck:
+            continue
+        if "vsys_sessions" not in unsupported:
+            try:
+                scoped = parse_sessions(request_xml(config, SESSION_COMMAND, vsys=vsys))
+            except ApiError as exc:
+                if INVALID_VSYS_PATTERN.search(str(exc)):
+                    missing[vsys] = now
+                    continue
+                if _is_unsupported(exc):
+                    unsupported.add("vsys_sessions")
+                    print(
+                        f"paloalto-api [{config['hostname']}] vsys_sessions: disabled, not supported: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                else:
+                    print(f"paloalto-api [{config['hostname']}] vsys_sessions {vsys}: {exc}", file=sys.stderr, flush=True)
+            else:
+                fields.update({name: scoped[name] for name in VSYS_SESSION_FIELDS if name in scoped})
+        missing.pop(vsys, None)
+        result.append((tags, fields))
+    return result
+
+
 def collect_firewall(config: dict, due: set[str]) -> list[str]:
     hostname = config["hostname"]
     output = []
     commands = {
         "sessions": (SESSION_COMMAND, parse_sessions, "paloalto_api_sessions"),
-        "vsys": (SESSION_METER_COMMAND, parse_session_meter, "paloalto_api_vsys"),
         "interface_status": (INTERFACE_STATUS_COMMAND, parse_interface_status, "paloalto_api_interfaces"),
         "ha": (HA_COMMAND, parse_ha_state, "paloalto_api_ha"),
         "storage": (STORAGE_COMMAND, parse_storage, "paloalto_api_storage"),
@@ -1300,6 +1362,8 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
                 )
             elif category == "counters":
                 parsed_sets = (("paloalto_api_counters", _collect_counters(config)),)
+            elif category == "vsys":
+                parsed_sets = (("paloalto_api_vsys", _collect_vsys(config)),)
             elif category == "management":
                 result = request_xml(config, MANAGEMENT_COMMAND)
                 parsed_sets = (

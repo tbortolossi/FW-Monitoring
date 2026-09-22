@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
 
@@ -21,6 +22,13 @@ DATASOURCE = {"type": "influxdb", "uid": "P951FEA4DE68E13C5"}
 # Physical front-panel ports only, so internal, VLAN, loopback, tunnel and
 # subinterface counters are not double-counted in global throughput.
 PHYSICAL = 'exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./'
+# Per-interface panels: physical Ethernet ports use the hardware counters of
+# paloalto_api_interfaces; subinterfaces, tunnels, VLAN, loopback and aggregate
+# interfaces only exist as ifnet (logical) counters, like ifXTable rows in SNMP.
+INTERFACE_SOURCE = (
+    '((r._measurement == "paloalto_api_interfaces" and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./)'
+    ' or (r._measurement == "paloalto_api_logical_interfaces" and (r.interface !~ /(?i)^ethernet/ or r.interface =~ /\\./)))'
+)
 # Chassis panel IDs are offset so shared sections never collide with the
 # dedicated chassis panels.
 CHASSIS_ID_OFFSET = 10000
@@ -558,19 +566,19 @@ def interface_rows() -> list[dict]:
             repeated_panel(timeseries(8, "Throughput ${interface}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r.interface == "${interface}" and r._field =~ /^(in|out)_octets$/)
+  |> filter(fn: (r) => r.hostname == "${hostname}" and r.interface == "${interface}" and r._field =~ /^(in|out)_octets$/ and ''' + INTERFACE_SOURCE + ''')
   |> derivative(unit: 1s, nonNegative: true)
   |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: if r._field == "in_octets" then "In" else "Out" }))
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 0, 12, 7, "bps", "Repeated automatically for every active physical Ethernet interface returned by the XML API."), "interface", max_per_row=2),
+''', 0, 0, 12, 7, "bps", "Repeated for every active physical Ethernet port (hardware ibytes/obytes) and every logical interface with counters: subinterfaces, tunnels, VLAN, loopback and aggregate interfaces (ifnet counters of show counter interface all)."), "interface", max_per_row=2),
         ]),
         row(9008, "API Interface Details", 0, [
             timeseries(9, "Packets per Second by Interface", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r.interface =~ /^${interface:regex}$/ and r._field =~ /^(in|out)_packets$/)
+  |> filter(fn: (r) => r.hostname == "${hostname}" and r.interface =~ /^${interface:regex}$/ and r._field =~ /^(in|out)_packets$/ and ''' + INTERFACE_SOURCE + ''')
   |> derivative(unit: 1s, nonNegative: true)
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> map(fn: (r) => ({ r with _field: r.interface + (if r._field == "in_packets" then " In" else " Out") }))
@@ -594,13 +602,13 @@ from(bucket: "firewalls")
             repeated_panel(timeseries(11, "Errors / Discards ${interface}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r.interface == "${interface}" and r._field =~ /^(in_errors|in_discards|out_errors)$/)
+  |> filter(fn: (r) => r.hostname == "${hostname}" and r.interface == "${interface}" and r._field =~ /^(in_errors|in_discards|out_errors)$/ and ''' + INTERFACE_SOURCE + ''')
   |> derivative(unit: 1s, nonNegative: true)
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> map(fn: (r) => ({ r with _field: if r._field == "in_errors" then "In Errors" else if r._field == "in_discards" then "In Discards" else "Out Errors" }))
   |> group(columns: ["_field"])
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 0, 24, 10, "pps", "Hardware ingress errors and discards plus MAC-level transmit errors from show counter interface all."), "interface", max_per_row=1),
+''', 0, 0, 24, 10, "pps", "Ingress errors and discards, plus MAC-level transmit errors on physical ports, from show counter interface all (hardware counters for Ethernet ports, ifnet counters for logical interfaces)."), "interface", max_per_row=1),
         ]),
     ]
 
@@ -625,12 +633,21 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 0, 8, 8, "short", "Sessions per VSYS summed across dataplanes from show session meter. The limit appears when a VSYS session resource limit is configured."),
+''', 0, 0, 12, 8, "short", "Sessions per VSYS summed across dataplanes from show session meter. The limit appears when a VSYS session resource limit is configured."),
+            timeseries(3103, "VSYS CPS", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_vsys" and r.hostname == "${hostname}" and r.vsys == "${vsys}" and r._field =~ /^(cps|packet_rate_pps)$/)
+  |> map(fn: (r) => ({ r with _field: if r._field == "cps" then "CPS" else "Packets/s" }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 12, 0, 12, 8, "short", "New sessions per second and packet rate of this VSYS from show session info scoped to the VSYS (SNMP panVsysTotalCps equivalent). PAN-OS exposes no per-zone CPS through the XML API."),
             timeseries(3102, "VSYS Throughput by Zone", f'''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => {logical} and r.vsys == "${{vsys}}" and exists r.zone and r._field =~ /^(in|out)_octets$/)
-{zone_throughput}''', 8, 0, 16, 8, "bps", "Logical interface octet counters of this VSYS summed by zone. In is traffic received from the zone."),
+{zone_throughput}''', 0, 8, 24, 8, "bps", "Logical interface octet counters of this VSYS summed by zone. In is traffic received from the zone."),
         ], repeat="vsys"),
         row(9010, "Zones, Logical Interfaces and Drop Reasons", 0, [
             timeseries(3111, "Throughput by Zone", f'''
@@ -784,6 +801,8 @@ from(bucket: "firewalls")
   |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
 ''', 12, 9, 12, 9, "short", "Current hardware and software DoS block-table entries. These counters are gauges, not rates."),
+            counter_rate(3305, "Scan / Packet-Based Drops", "^(flow_scan_drop|flow_dos_pf_.*|flow_dos_ip6.*|flow_dos_curr_sess_(incr|decr)_failed)$", 0, 18, 24,
+                         "Scan, packet-based attack (spoofing, fragments, malformed options, IPv6) and DoS session-accounting failures, equivalent to the SNMP scan / packet-based drops panel."),
         ]),
         row(9011, "Filtered Global Drop Counters", 0, [
             timeseries(16, "Selected Drop / Failure Counters", '''
@@ -1224,13 +1243,20 @@ from(bucket: "firewalls")
   |> keep(columns: ["_value"])
 '''
 INTERFACE_QUERY = '''
-from(bucket: "firewalls")
+physical = from(bucket: "firewalls")
   |> range(start: -24h)
   |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r._field == "state" and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./)
   |> group(columns: ["interface"])
   |> last()
   |> filter(fn: (r) => r._value == "up")
   |> map(fn: (r) => ({ _value: r.interface }))
+logical = from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_logical_interfaces" and r.hostname == "${hostname}" and r._field == "in_octets" and (r.interface !~ /(?i)^ethernet/ or r.interface =~ /\\./) and r.interface !~ /(?i)^(internal|hsci|ha[0-9]*|mgmt|management)/)
+  |> group(columns: ["interface"])
+  |> last()
+  |> map(fn: (r) => ({ _value: r.interface }))
+union(tables: [physical, logical])
   |> group()
   |> distinct(column: "_value")
   |> sort(columns: ["_value"])
@@ -1321,6 +1347,104 @@ def add_imports(panels: list[dict]) -> list[dict]:
         add_imports(panel.get("panels", []))
     return panels
 
+# PAN-OS CLI equivalent of the XML API op command the collector runs for each
+# measurement, with the default polling interval from CATEGORY_SCHEDULES in
+# telegraf/paloalto_api_collector.py. Keep both in sync when adding a category.
+# The description of every panel gets a "Source" line built from this table so
+# the (i) tooltip in Grafana tells the operator which command backs the data.
+MEASUREMENT_SOURCES = {
+    "paloalto_api_sessions": [("show session info", 20)],
+    "paloalto_api_vsys": [("show session meter", 60), ("show session info (per VSYS)", 60)],
+    "paloalto_api_interfaces": [("show counter interface all", 20), ("show interface all", 60)],
+    "paloalto_api_logical_interfaces": [("show counter interface all", 20)],
+    "paloalto_api_management": [("show system resources", 60)],
+    "paloalto_api_processes": [("show system resources", 60)],
+    "paloalto_api_dataplane_cpu": [("show running resource-monitor minute last 1", 60)],
+    "paloalto_api_dataplane_resources": [("show running resource-monitor minute last 1", 60)],
+    "paloalto_api_ingress_backlogs": [("show running resource-monitor ingress-backlogs", 60)],
+    "paloalto_api_counters": [
+        ("show counter global filter severity drop", 60),
+        ("show counter global filter aspect dos", 60),
+    ],
+    "paloalto_api_ha": [("show high-availability state", 60)],
+    "paloalto_api_sensors": [
+        ("show system environmentals thermal", 60),
+        ("show system environmentals fans", 60),
+        ("show system environmentals power", 60),
+    ],
+    "paloalto_api_logging": [("debug log-receiver statistics", 60)],
+    "paloalto_api_globalprotect": [("show global-protect-gateway statistics", 60)],
+    "paloalto_api_software": [("show system software status", 60)],
+    "paloalto_api_raid": [("show system raid detail", 3600)],
+    "paloalto_api_storage": [("show system disk-space", 3600)],
+    "paloalto_api_system": [("show system info", 3600)],
+    "paloalto_api_chassis_inventory": [("show chassis inventory", 3600)],
+    "paloalto_api_chassis_status": [("show chassis status", 60)],
+    "paloalto_api_chassis_power": [("show chassis power", 60)],
+}
+# paloalto_api_interfaces mixes hardware counters (show counter interface all)
+# with link state (show interface all); the field filter tells which one a
+# panel reads. paloalto_api_sensors is split by the sensor_type tag.
+INTERFACE_STATUS_FIELDS = ("state", "speed_mbps", "duplex", "mode", "zone", "vsys", "forwarding", "enabled")
+SENSOR_COMMANDS = {"thermal": "thermal", "fan": "fans", "power": "power"}
+MEASUREMENT_PATTERN = re.compile(r'_measurement == "(paloalto_api_[a-z_]+)"')
+SENSOR_TYPE_PATTERN = re.compile(r'sensor_type == "([a-z]+)"')
+FIELD_PATTERN = re.compile(r'_field (?:==|=~) (?:"([a-z_]+)"|/([^/]+)/)')
+
+
+def panel_sources(queries: list[str]) -> list[tuple[str, int]]:
+    """Ordered, de-duplicated CLI commands backing a panel's Flux queries."""
+    sources: list[tuple[str, int]] = []
+    for query in queries:
+        fields = {name for match in FIELD_PATTERN.finditer(query) for name in re.findall(r"[a-z_]+", "".join(g for g in match.groups() if g))}
+        sensor_types = set(SENSOR_TYPE_PATTERN.findall(query))
+        for measurement in MEASUREMENT_PATTERN.findall(query):
+            candidates = MEASUREMENT_SOURCES.get(measurement, [])
+            if measurement == "paloalto_api_interfaces" and fields:
+                status = fields & set(INTERFACE_STATUS_FIELDS)
+                counters = fields - set(INTERFACE_STATUS_FIELDS)
+                candidates = [
+                    source for source in candidates
+                    if (source[0].startswith("show counter") and counters) or (source[0] == "show interface all" and status)
+                ]
+            elif measurement == "paloalto_api_sensors" and sensor_types:
+                wanted = {SENSOR_COMMANDS[kind] for kind in sensor_types if kind in SENSOR_COMMANDS}
+                candidates = [source for source in candidates if source[0].rsplit(" ", 1)[1] in wanted]
+            for source in candidates:
+                if source not in sources:
+                    sources.append(source)
+    return sources
+
+
+def source_note(sources: list[tuple[str, int]]) -> str:
+    def interval(seconds: int) -> str:
+        if seconds >= 3600:
+            return "hour" if seconds == 3600 else f"{seconds // 3600} hours"
+        return f"{seconds // 60} min" if seconds >= 60 else f"{seconds} s"
+
+    if len(sources) == 1:
+        command, seconds = sources[0]
+        return f"Source: `{command}` via the PAN-OS XML API, polled every {interval(seconds)} by default."
+    lines = "\n".join(f"- `{command}` every {interval(seconds)}" for command, seconds in sources)
+    return f"Sources via the PAN-OS XML API, polled by default:\n\n{lines}"
+
+
+def add_sources(panels: list[dict]) -> list[dict]:
+    """Append the backing PAN-OS command to every panel description.
+
+    Grafana shows the description behind an (i) icon in the panel header, so
+    operators can see which CLI command produced the data without opening the
+    collector. Rows and text panels have no query and are left untouched.
+    """
+    for panel in panels:
+        sources = panel_sources([item["query"] for item in panel.get("targets", [])])
+        if sources:
+            note = source_note(sources)
+            description = panel.get("description", "").rstrip()
+            panel["description"] = f"{description}\n\n{note}" if description else note
+        add_sources(panel.get("panels", []))
+    return panels
+
 
 def build_dashboard() -> dict:
     panels = [*header_panels(), *kpi_panels(4), *overview_panels(), *shared_body(sensors=True, raid=True)]
@@ -1338,7 +1462,7 @@ schema.tagValues(bucket: "firewalls", tag: "hostname", predicate: (r) => r._meas
         ),
         tags=["paloalto", "xml-api", "firewall", "performance"],
         version=5,
-        panels=add_imports(stack_rows(panels)),
+        panels=add_sources(add_imports(stack_rows(panels))),
         hostname_query=hostname_query,
     )
 
@@ -1380,7 +1504,7 @@ from(bucket: "firewalls")
         ),
         tags=["paloalto", "xml-api", "chassis", "performance"],
         version=3,
-        panels=add_imports(stack_rows(panels)),
+        panels=add_sources(add_imports(stack_rows(panels))),
         hostname_query=hostname_query,
     )
 

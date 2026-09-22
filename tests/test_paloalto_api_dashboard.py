@@ -1,8 +1,16 @@
 import json
+import re
 import unittest
 from pathlib import Path
 
-from scripts.build_paloalto_api_dashboard import build_chassis_dashboard, build_dashboard
+from scripts.build_paloalto_api_dashboard import (
+    MEASUREMENT_SOURCES,
+    build_chassis_dashboard,
+    build_dashboard,
+    panel_sources,
+    source_note,
+)
+from telegraf import paloalto_api_collector as collector
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,11 +63,14 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
         self.assertEqual(throughput["maxPerRow"], 2)
         self.assertIn('r.interface == "${interface}"', throughput["targets"][0]["query"])
         self.assertIn("paloalto_api_interfaces", throughput["targets"][0]["query"])
+        # Subinterfaces, tunnels, VLAN and loopback only have ifnet counters.
+        self.assertIn("paloalto_api_logical_interfaces", throughput["targets"][0]["query"])
 
         errors = rows["Interface Errors / Discards"]["panels"][0]
         self.assertEqual(errors["title"], "Errors / Discards ${interface}")
         self.assertEqual(errors["repeat"], "interface")
         self.assertIn("in_errors|in_discards", errors["targets"][0]["query"])
+        self.assertIn("paloalto_api_logical_interfaces", errors["targets"][0]["query"])
 
         interface = next(item for item in self.dashboard["templating"]["list"] if item["name"] == "interface")
         self.assertTrue(interface["includeAll"])
@@ -67,6 +78,9 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
         self.assertIn('r._value == "up"', interface["query"])
         self.assertIn("^ethernet", interface["query"])
         self.assertIn("r.interface !~ /\\./", interface["query"])
+        self.assertIn("paloalto_api_logical_interfaces", interface["query"])
+        self.assertIn("union(tables: [physical, logical])", interface["query"])
+        self.assertIn("^(internal|hsci|ha[0-9]*|mgmt|management)", interface["query"])
 
         global_throughput = next(panel for panel in self.dashboard["panels"] if panel.get("title") == "Throughput Global Interfaces")
         self.assertIn("^ethernet", global_throughput["targets"][0]["query"])
@@ -94,6 +108,13 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
                 self.assertIn(title, titles)
             rows = {panel["title"]: panel for panel in dashboard["panels"] if panel["type"] == "row"}
             self.assertEqual(rows["VSYS ${vsys}"]["repeat"], "vsys")
+            vsys_titles = [panel["title"] for panel in rows["VSYS ${vsys}"]["panels"]]
+            self.assertEqual(vsys_titles, ["VSYS Sessions", "VSYS CPS", "VSYS Throughput by Zone"])
+            cps = rows["VSYS ${vsys}"]["panels"][1]["targets"][0]["query"]
+            self.assertIn('r._measurement == "paloalto_api_vsys"', cps)
+            self.assertIn("cps|packet_rate_pps", cps)
+            drop_titles = [panel["title"] for panel in rows["Data Plane Pressure and Key Drops"]["panels"]]
+            self.assertIn("Scan / Packet-Based Drops", drop_titles)
             names = {item["name"] for item in dashboard["templating"]["list"]}
             self.assertTrue({"interface", "dataplane", "vsys"}.issubset(names))
 
@@ -232,6 +253,60 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
         self.assertNotIn("pan_entity", serialized)
         self.assertNotIn("ifHCInOctets", serialized)
         self.assertNotIn("ifHCOutOctets", serialized)
+
+    def test_every_queried_panel_describes_its_pan_os_command(self):
+        """The (i) tooltip of each panel names the CLI command behind the data."""
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            stack = list(dashboard["panels"])
+            while stack:
+                panel = stack.pop()
+                stack.extend(panel.get("panels", []))
+                if panel.get("targets"):
+                    self.assertRegex(panel["description"], r"Sources?:? .*PAN-OS XML API", panel["title"])
+                    self.assertIn("`show ", panel["description"].replace("`debug ", "`show "), panel["title"])
+                elif panel["type"] in ("row", "text"):
+                    self.assertNotIn("PAN-OS XML API", panel.get("description", ""))
+        uptime = next(panel for panel in self.dashboard["panels"] if panel["title"] == "Uptime")
+        self.assertIn("`show system info`", uptime["description"])
+        self.assertIn("every hour", uptime["description"])
+        sessions = next(panel for panel in self.dashboard["panels"] if panel["title"] == "Active Sessions")
+        self.assertTrue(sessions["description"].startswith("Source: `show session info`"))
+        self.assertIn("every 20 s", sessions["description"])
+
+    def test_measurement_sources_match_the_collector(self):
+        """Every measurement the collector writes has a CLI command, and each
+        listed command is the CLI spelling of an XML op command it sends."""
+        source = collector.__file__
+        written = set(re.findall(r'"(paloalto_api_[a-z_]+)"', Path(source).read_text(encoding="utf-8")))
+        self.assertEqual(written, set(MEASUREMENT_SOURCES))
+        # Opening tag names and text nodes, in order, spell the CLI command.
+        xml_commands = {
+            " ".join(filter(None, (word for pair in re.findall(r"<([a-z-]+)>([^<]*)", value) for word in pair)))
+            for name, value in vars(collector).items()
+            if name.endswith("_COMMAND")
+        }
+        for sources in MEASUREMENT_SOURCES.values():
+            for command, seconds in sources:
+                self.assertIn(seconds, (20, 60, 3600), command)
+                cli = command.replace(" (per VSYS)", "").split()
+                self.assertIn(" ".join(cli), xml_commands, command)
+
+    def test_panel_sources_follow_the_query_fields(self):
+        counters = 'r._measurement == "paloalto_api_interfaces" and r._field =~ /^(in|out)_octets$/'
+        status = 'r._measurement == "paloalto_api_interfaces" and r._field == "speed_mbps"'
+        both = 'r._measurement == "paloalto_api_interfaces" and r._field =~ /^(state|link_down_count)$/'
+        self.assertEqual([c for c, _ in panel_sources([counters])], ["show counter interface all"])
+        self.assertEqual([c for c, _ in panel_sources([status])], ["show interface all"])
+        self.assertEqual([c for c, _ in panel_sources([both])], ["show counter interface all", "show interface all"])
+        self.assertEqual([c for c, _ in panel_sources([counters, status])], ["show counter interface all", "show interface all"])
+        fans = 'r._measurement == "paloalto_api_sensors" and r.sensor_type == "fan" and r._field == "rpm"'
+        self.assertEqual([c for c, _ in panel_sources([fans])], ["show system environmentals fans"])
+        alarms = 'r._measurement == "paloalto_api_sensors" and r._field == "alarm"'
+        self.assertEqual(len(panel_sources([alarms])), 3)
+        self.assertEqual(panel_sources(['r._measurement == "pan_system"']), [])
+        note = source_note([("show a", 20), ("show b", 7200)])
+        self.assertIn("- `show a` every 20 s", note)
+        self.assertIn("- `show b` every 2 hours", note)
 
     def test_datasource_uid_is_stable(self):
         serialized = json.dumps(self.dashboard)

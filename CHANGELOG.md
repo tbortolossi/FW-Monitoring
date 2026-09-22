@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Every panel of the two Palo Alto API dashboards now shows, behind the (i) icon in its header, the PAN-OS CLI command the collector runs to obtain the data and its default polling interval; the builder derives it from a measurement-to-command table checked against the collector by the tests.
+- API per-VSYS CPS, packet rate and TCP/UDP/ICMP session counts from `show session info` scoped to each VSYS (`paloalto_api_vsys` fields `cps`, `packet_rate_pps`, `sessions_tcp`, `sessions_udp`, `sessions_icmp`), with a **VSYS CPS** panel in the repeated VSYS section of both API dashboards.
+- The repeated per-interface **Throughput** and **Errors / Discards** panels of the API dashboards now include subinterfaces, tunnels, VLAN, loopback and aggregate interfaces from the logical `ifnet` counters, matching the SNMP dashboard; physical ports keep the hardware counters.
+- **Scan / Packet-Based Drops** panel (scan, packet-based attack, IPv6 and DoS session-accounting counters) in the API "Data Plane Pressure and Key Drops" section, equivalent to the SNMP panel.
+
+### Fixed
+
+- VSYS slots that `show session meter` lists but that are not configured on the firewall (PAN-OS answers "You must specify a valid vsys") are no longer written to `paloalto_api_vsys`; they are probed again every `system_interval` (default one hour). Existing stale points can be removed with an InfluxDB delete on `_measurement="paloalto_api_vsys" AND vsys="<name>"`.
+- `request_xml()` in the collector keeps the PAN-OS explanation of HTTP 4xx answers in the error message.
+
 ## 1.2.0 - 2026-09-22
 
 Behavior changes to review before upgrading (see "Upgrade from v1.0.2" and "Upgrade from v1.1.0" in `README.md`):
