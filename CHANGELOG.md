@@ -12,6 +12,10 @@
 - API management-plane swap, I/O wait, task counts, and aggregated process CPU/memory metrics.
 - Bounded collection of all active PAN-OS `severity drop` global counters with severity, category, aspect, rate, and description metadata.
 - Dedicated API-only throughput and ingress error/discard panels repeated for every active physical Ethernet port, with global throughput excluding internal and logical aggregate counters.
+- API dashboards now match the SNMP dashboards: the chassis API dashboard includes the full main view (sessions, CPS, session utilization, and repeated per-interface throughput and error panels), and both dashboards include per-VSYS sections (sessions and throughput by zone) and curated policy-deny, DoS, zone-protection, SYN-cookie, and block-table panels.
+- API current-load strip with thresholds, a hottest-core line per dataplane, an active-core CPU summary and per-core load map, a link-utilization table, worst-dataplane resource pressure, global drop rate by category, and a top-counters table with PAN-OS descriptions.
+- API collection of per-VSYS sessions (`show session meter`), logical interface counters tagged with zone and VSYS (throughput and per-reason drops), hardware port transmit errors and link-down counts, DoS-aspect global counters, and HA peer state and configuration/session synchronization.
+- Optional API commands that a platform rejects are disabled for that firewall after the first failure instead of being logged on every poll.
 
 ### Fixed
 
