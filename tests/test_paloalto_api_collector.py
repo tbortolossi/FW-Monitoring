@@ -1,3 +1,4 @@
+import io
 import os
 import tempfile
 import unittest
@@ -878,6 +879,113 @@ class ErrorPathTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ApiError, "request failed: .*connection refused"):
                 request_xml({"host": "192.0.2.1", "api_key_env": "PAN_KEY"}, "<show/>")
+
+    def test_request_xml_scopes_command_to_vsys(self):
+        with mock.patch.dict(os.environ, {"PAN_KEY": "k"}, clear=True), self._urlopen_returning(
+            b'<response status="success"><result><cps>3</cps></result></response>'
+        ) as urlopen:
+            request_xml({"host": "192.0.2.1", "api_key_env": "PAN_KEY"}, "<show/>", vsys="vsys1")
+            plain = request_xml({"host": "192.0.2.1", "api_key_env": "PAN_KEY"}, "<show/>")
+        scoped_body = urlopen.call_args_list[0].args[0].data.decode()
+        plain_body = urlopen.call_args_list[1].args[0].data.decode()
+        self.assertIn("vsys=vsys1", scoped_body)
+        self.assertNotIn("vsys=", plain_body)
+        self.assertEqual(plain.findtext("cps"), "3")
+
+    def test_request_xml_http_error_keeps_pan_os_explanation(self):
+        error = urllib.error.HTTPError(
+            "https://192.0.2.1/api/", 400, "Bad Request", {}, io.BytesIO(b"You must specify a valid vsys")
+        )
+        with mock.patch.dict(os.environ, {"PAN_KEY": "k"}, clear=True), mock.patch(
+            "urllib.request.urlopen", side_effect=error
+        ):
+            with self.assertRaisesRegex(ApiError, "HTTP 400: You must specify a valid vsys"):
+                request_xml({"host": "192.0.2.1", "api_key_env": "PAN_KEY"}, "<show/>")
+
+
+class VsysCollectionTests(unittest.TestCase):
+    METER = ET.fromstring(
+        "<result>"
+        "<entry><vsys>1</vsys><maximum>0</maximum><current>402</current><throttled>0</throttled></entry>"
+        "<entry><vsys>2</vsys><maximum>0</maximum><current>0</current><throttled>0</throttled></entry>"
+        "</result>"
+    )
+    SCOPED = ET.fromstring(
+        "<result><cps>8</cps><pps>204</pps><num-active>351</num-active><num-max>200000</num-max>"
+        "<num-tcp>218</num-tcp><num-udp>101</num-udp><num-icmp>32</num-icmp></result>"
+    )
+
+    def _request(self, calls):
+        def request(_config, command, vsys=None):
+            calls.append((command, vsys))
+            if "<meter>" in command:
+                return self.METER
+            if vsys == "vsys2":
+                raise ApiError("request failed: HTTP 400: You must specify a valid vsys")
+            return self.SCOPED
+
+        return request
+
+    def test_unconfigured_vsys_slots_are_dropped_and_cps_is_added(self):
+        config = {"hostname": "fw", "host": "192.0.2.1", "api_key_env": "KEY"}
+        calls = []
+        with mock.patch("telegraf.paloalto_api_collector.request_xml", side_effect=self._request(calls)):
+            lines = collect_firewall(config, {"vsys"})
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("paloalto_api_vsys,hostname=fw,vsys=vsys1 "))
+        for field in ("sessions_active=402i", "cps=8i", "packet_rate_pps=204i", "sessions_tcp=218i", "sessions_udp=101i", "sessions_icmp=32i"):
+            self.assertIn(field, lines[0])
+        # The meter keeps the DP-summed session count; num-max of the scoped
+        # output is the platform limit, not a VSYS limit.
+        self.assertNotIn("sessions_active=351i", lines[0])
+        self.assertNotIn("sessions_max", lines[0])
+        self.assertIn("vsys2", config["_missing_vsys"])
+        self.assertEqual([vsys for _, vsys in calls], [None, "vsys1", "vsys2"])
+
+    def test_missing_vsys_is_probed_again_only_after_system_interval(self):
+        config = {"hostname": "fw", "host": "192.0.2.1", "api_key_env": "KEY", "system_interval": 3600}
+        calls = []
+        with mock.patch("telegraf.paloalto_api_collector.request_xml", side_effect=self._request(calls)):
+            collect_firewall(config, {"vsys"})
+            collect_firewall(config, {"vsys"})
+            self.assertEqual([vsys for _, vsys in calls].count("vsys2"), 1)
+            config["_missing_vsys"]["vsys2"] -= 3601
+            collect_firewall(config, {"vsys"})
+        self.assertEqual([vsys for _, vsys in calls].count("vsys2"), 2)
+
+    def test_scoped_session_info_is_disabled_when_unsupported_but_meter_survives(self):
+        config = {"hostname": "fw", "host": "192.0.2.1", "api_key_env": "KEY"}
+        calls = []
+
+        def request(_config, command, vsys=None):
+            calls.append(vsys)
+            if vsys:
+                raise ApiError("You are not authorized to perform this operation")
+            return self.METER
+
+        with mock.patch("telegraf.paloalto_api_collector.request_xml", side_effect=request), mock.patch("sys.stderr"):
+            first = collect_firewall(config, {"vsys"})
+            second = collect_firewall(config, {"vsys"})
+        self.assertEqual(len(first), 2)
+        self.assertIn("sessions_active=402i", first[0])
+        self.assertNotIn("cps=", first[0])
+        self.assertIn("vsys_sessions", config["_unsupported"])
+        self.assertEqual(calls, [None, "vsys1", None])
+        self.assertEqual(len(second), 2)
+
+    def test_transient_scoped_failure_keeps_the_vsys_point(self):
+        config = {"hostname": "fw", "host": "192.0.2.1", "api_key_env": "KEY"}
+
+        def request(_config, command, vsys=None):
+            if vsys:
+                raise ApiError("request failed: timed out")
+            return self.METER
+
+        with mock.patch("telegraf.paloalto_api_collector.request_xml", side_effect=request), mock.patch("sys.stderr"):
+            lines = collect_firewall(config, {"vsys"})
+        self.assertEqual(len(lines), 2)
+        self.assertNotIn("vsys_sessions", config["_unsupported"])
+        self.assertEqual(config["_missing_vsys"], {})
 
 
 if __name__ == "__main__":

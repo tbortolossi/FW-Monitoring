@@ -56,7 +56,8 @@
         }
       ],
       "title": "Uptime",
-      "type": "stat"
+      "type": "stat",
+      "description": "Source: `show system info` via the PAN-OS XML API, polled every hour by default."
     },
     {
       "fieldConfig": {
@@ -182,7 +183,7 @@
       ],
       "title": "DP CPU (avg)",
       "type": "stat",
-      "description": "Highest per-dataplane average across all cores. This is the value SNMP reports."
+      "description": "Highest per-dataplane average across all cores. This is the value SNMP reports.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -251,7 +252,7 @@
       ],
       "title": "Hottest DP Core",
       "type": "stat",
-      "description": "Busiest individual dataplane core. Uses the per-core peak within each minute (cpu_max_pct) when the collector provides it and falls back to the per-core one-minute average (cpu_pct): both fields are merged and the highest value per minute wins. A high value with a lower average reveals imbalance or saturated cores hidden by the average."
+      "description": "Busiest individual dataplane core. Uses the per-core peak within each minute (cpu_max_pct) when the collector provides it and falls back to the per-core one-minute average (cpu_pct): both fields are merged and the highest value per minute wins. A high value with a lower average reveals imbalance or saturated cores hidden by the average.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -320,7 +321,7 @@
       ],
       "title": "MP CPU",
       "type": "stat",
-      "description": ""
+      "description": "Source: `show system resources` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -389,7 +390,7 @@
       ],
       "title": "MP RAM",
       "type": "stat",
-      "description": ""
+      "description": "Source: `show system resources` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -449,7 +450,7 @@
       ],
       "title": "Active Sessions",
       "type": "stat",
-      "description": ""
+      "description": "Source: `show session info` via the PAN-OS XML API, polled every 20 s by default."
     },
     {
       "datasource": {
@@ -518,7 +519,7 @@
       ],
       "title": "Session Table",
       "type": "stat",
-      "description": ""
+      "description": "Source: `show session info` via the PAN-OS XML API, polled every 20 s by default."
     },
     {
       "datasource": {
@@ -578,7 +579,7 @@
       ],
       "title": "CPS",
       "type": "stat",
-      "description": ""
+      "description": "Source: `show session info` via the PAN-OS XML API, polled every 20 s by default."
     },
     {
       "datasource": {
@@ -638,7 +639,7 @@
       ],
       "title": "Throughput (In + Out)",
       "type": "stat",
-      "description": "Sum of physical Ethernet In and Out rates from hardware octet counters, with a 30-minute sparkline."
+      "description": "Sum of physical Ethernet In and Out rates from hardware octet counters, with a 30-minute sparkline.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
     },
     {
       "datasource": {
@@ -716,7 +717,7 @@
       ],
       "title": "CPU MP / DP by Slot",
       "type": "timeseries",
-      "description": "Management-plane CPU, the all-core average of every dataplane (equivalent to SNMP), the busiest core of every dataplane (one-minute average) and its peak within the minute. Dashed lines mark 70% and 90%. Per-core curves are in the repeated Dataplane rows."
+      "description": "Management-plane CPU, the all-core average of every dataplane (equivalent to SNMP), the busiest core of every dataplane (one-minute average) and its peak within the minute. Dashed lines mark 70% and 90%. Per-core curves are in the repeated Dataplane rows.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show system resources` every 1 min\n- `show running resource-monitor minute last 1` every 1 min"
     },
     {
       "datasource": {
@@ -794,7 +795,7 @@
       ],
       "title": "MP RAM Usage",
       "type": "timeseries",
-      "description": ""
+      "description": "Source: `show system resources` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -850,7 +851,7 @@
       ],
       "title": "Sessions",
       "type": "timeseries",
-      "description": ""
+      "description": "Source: `show session info` via the PAN-OS XML API, polled every 20 s by default."
     },
     {
       "datasource": {
@@ -906,7 +907,7 @@
       ],
       "title": "Global CPS",
       "type": "timeseries",
-      "description": ""
+      "description": "Source: `show session info` via the PAN-OS XML API, polled every 20 s by default."
     },
     {
       "datasource": {
@@ -984,7 +985,7 @@
       ],
       "title": "Session Utilization",
       "type": "timeseries",
-      "description": ""
+      "description": "Source: `show session info` via the PAN-OS XML API, polled every 20 s by default."
     },
     {
       "datasource": {
@@ -1040,7 +1041,7 @@
       ],
       "title": "Throughput Global Interfaces",
       "type": "timeseries",
-      "description": "Total throughput calculated from PAN-OS hardware interface octet counters."
+      "description": "Total throughput calculated from PAN-OS hardware interface octet counters.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
     },
     {
       "datasource": {
@@ -1289,7 +1290,7 @@
       ],
       "title": "Interface Load (last 5 minutes)",
       "type": "table",
-      "description": "Current link utilization of every physical port with a negotiated speed, busiest first. Calculated from hardware octet counters and the speed reported by show interface all."
+      "description": "Current link utilization of every physical port with a negotiated speed, busiest first. Calculated from hardware octet counters and the speed reported by show interface all.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter interface all` every 20 s\n- `show interface all` every 1 min"
     },
     {
       "datasource": {
@@ -1367,7 +1368,7 @@
       ],
       "title": "Dataplane Resource Pressure",
       "type": "timeseries",
-      "description": "Worst dataplane for each resource-monitor resource: session table, packet buffers, packet descriptors and software tags. Buffer or descriptor pressure precedes packet drops."
+      "description": "Worst dataplane for each resource-monitor resource: session table, packet buffers, packet descriptors and software tags. Buffer or descriptor pressure precedes packet drops.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -1445,7 +1446,7 @@
       ],
       "title": "Ingress Backlog by Dataplane",
       "type": "timeseries",
-      "description": "Packet-processing ingress queue usage per dataplane from show running resource-monitor ingress-backlogs. 0% means no backlog; a sustained backlog means the dataplane cannot keep up and precedes buffer exhaustion and drops. Dashed lines mark 50% and 80%."
+      "description": "Packet-processing ingress queue usage per dataplane from show running resource-monitor ingress-backlogs. 0% means no backlog; a sustained backlog means the dataplane cannot keep up and precedes buffer exhaustion and drops. Dashed lines mark 50% and 80%.\n\nSource: `show running resource-monitor ingress-backlogs` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -1505,7 +1506,7 @@
       ],
       "title": "Global Drop Rate by Category",
       "type": "timeseries",
-      "description": "Packets dropped per second by the dataplane, stacked by PAN-OS counter category so the total drop rate is the top of the stack. Details are in the drop counter sections."
+      "description": "Packets dropped per second by the dataplane, stacked by PAN-OS counter category so the total drop rate is the top of the stack. Details are in the drop counter sections.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter global filter severity drop` every 1 min\n- `show counter global filter aspect dos` every 1 min"
     },
     {
       "datasource": {
@@ -1565,7 +1566,7 @@
       ],
       "title": "Cards Up",
       "type": "stat",
-      "description": "Slots whose card reports an Up status in show chassis status."
+      "description": "Slots whose card reports an Up status in show chassis status.\n\nSource: `show chassis status` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -1629,7 +1630,7 @@
       ],
       "title": "Cards Not Up",
       "type": "stat",
-      "description": "Installed cards whose status is not Up (down, booting, failed, disabled). Empty slots are ignored."
+      "description": "Installed cards whose status is not Up (down, booting, failed, disabled). Empty slots are ignored.\n\nSource: `show chassis status` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -1698,7 +1699,7 @@
       ],
       "title": "Power Budget Used",
       "type": "stat",
-      "description": "Power used divided by power provided from show chassis power."
+      "description": "Power used divided by power provided from show chassis power.\n\nSource: `show chassis power` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -1766,7 +1767,7 @@
       ],
       "title": "Hottest Sensor",
       "type": "stat",
-      "description": "Highest thermal sensor reading across every slot, with a 30-minute sparkline."
+      "description": "Highest thermal sensor reading across every slot, with a 30-minute sparkline.\n\nSource: `show system environmentals thermal` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -1830,7 +1831,7 @@
       ],
       "title": "Sensor Alarms",
       "type": "stat",
-      "description": "Thermal, fan and power sensors currently reporting an alarm."
+      "description": "Thermal, fan and power sensors currently reporting an alarm.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show system environmentals thermal` every 1 min\n- `show system environmentals fans` every 1 min\n- `show system environmentals power` every 1 min"
     },
     {
       "datasource": {
@@ -1890,7 +1891,7 @@
       ],
       "title": "Slowest Fan",
       "type": "stat",
-      "description": "Lowest fan speed across every slot; a fan reporting 0 rpm has stopped."
+      "description": "Lowest fan speed across every slot; a fan reporting 0 rpm has stopped.\n\nSource: `show system environmentals fans` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "datasource": {
@@ -1979,7 +1980,7 @@
       ],
       "title": "Slot State",
       "type": "state-timeline",
-      "description": "Operational state of every slot from show chassis status. Green is Up, grey is empty, blue is disabled, red is any other state."
+      "description": "Operational state of every slot from show chassis status. Green is Up, grey is empty, blue is disabled, red is any other state.\n\nSource: `show chassis status` via the PAN-OS XML API, polled every 1 min by default."
     },
     {
       "collapsed": true,
@@ -2033,7 +2034,7 @@
           ],
           "title": "Installed Cards",
           "type": "table",
-          "description": "Inventory from show chassis inventory. Serial numbers remain in the local monitoring database."
+          "description": "Inventory from show chassis inventory. Serial numbers remain in the local monitoring database.\n\nSource: `show chassis inventory` via the PAN-OS XML API, polled every hour by default."
         },
         {
           "datasource": {
@@ -2077,7 +2078,7 @@
           ],
           "title": "Live Slot State",
           "type": "table",
-          "description": "Operational state, role and configuration state from show chassis status."
+          "description": "Operational state, role and configuration state from show chassis status.\n\nSource: `show chassis status` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -2184,7 +2185,7 @@
           ],
           "title": "RAID",
           "type": "table",
-          "description": "Disk pair state from show system raid detail, on platforms with a RAID log disk (PA-5200/5400/5500/7000 Series)."
+          "description": "Disk pair state from show system raid detail, on platforms with a RAID log disk (PA-5200/5400/5500/7000 Series).\n\nSource: `show system raid detail` via the PAN-OS XML API, polled every hour by default."
         }
       ],
       "title": "Chassis Slot Inventory",
@@ -2254,7 +2255,7 @@
           ],
           "title": "Power by Component",
           "type": "timeseries",
-          "description": ""
+          "description": "Source: `show chassis power` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -2298,7 +2299,7 @@
           ],
           "title": "Power / Card Status",
           "type": "table",
-          "description": ""
+          "description": "Source: `show chassis power` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -2354,7 +2355,7 @@
           ],
           "title": "Chassis Power Budget",
           "type": "timeseries",
-          "description": "Power provided, used and remaining, equivalent to the SNMP chassis power panel."
+          "description": "Power provided, used and remaining, equivalent to the SNMP chassis power panel.\n\nSource: `show chassis power` via the PAN-OS XML API, polled every 1 min by default."
         }
       ],
       "title": "Chassis Power",
@@ -2424,7 +2425,7 @@
           ],
           "title": "Temperatures by Slot",
           "type": "timeseries",
-          "description": "Thermal sensors from show system environmentals thermal."
+          "description": "Thermal sensors from show system environmentals thermal.\n\nSource: `show system environmentals thermal` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -2480,7 +2481,7 @@
           ],
           "title": "Fan Speed by Slot",
           "type": "timeseries",
-          "description": "Fan speeds from show system environmentals fans."
+          "description": "Fan speeds from show system environmentals fans.\n\nSource: `show system environmentals fans` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -2536,7 +2537,7 @@
           ],
           "title": "Power Sensor Values",
           "type": "timeseries",
-          "description": "Power supply voltages, currents and wattage from show system environmentals power."
+          "description": "Power supply voltages, currents and wattage from show system environmentals power.\n\nSource: `show system environmentals power` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -2580,7 +2581,7 @@
           ],
           "title": "Environmental Alarms",
           "type": "table",
-          "description": "Latest alarm flag of every sensor; alarmed sensors sort first."
+          "description": "Latest alarm flag of every sensor; alarmed sensors sort first.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show system environmentals thermal` every 1 min\n- `show system environmentals fans` every 1 min\n- `show system environmentals power` every 1 min"
         }
       ],
       "title": "Thermal, Fans and Power Sensors",
@@ -2650,7 +2651,7 @@
           ],
           "title": "Throughput by Interface",
           "type": "timeseries",
-          "description": "Every physical port in one view; ports are named ethernet<slot>/<port>."
+          "description": "Every physical port in one view; ports are named ethernet<slot>/<port>.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
         }
       ],
       "title": "Interfaces by Slot",
@@ -2752,7 +2753,8 @@
             }
           ],
           "title": "HA Role Changes",
-          "type": "state-timeline"
+          "type": "state-timeline",
+          "description": "Source: `show high-availability state` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -2881,7 +2883,7 @@
           ],
           "title": "HA Synchronization",
           "type": "table",
-          "description": "Local and peer state, peer connection, running-configuration and session-state synchronization from show high-availability state. Every other HA field the collector adds appears here automatically."
+          "description": "Local and peer state, peer connection, running-configuration and session-state synchronization from show high-availability state. Every other HA field the collector adds appears here automatically.\n\nSource: `show high-availability state` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -3034,7 +3036,7 @@
           ],
           "title": "HA Links and Monitoring",
           "type": "table",
-          "description": "HA1 control link and HA2 data link status, link and path monitoring, the reason and duration of the current state, and the election priorities and preemption from show high-availability all."
+          "description": "HA1 control link and HA2 data link status, link and path monitoring, the reason and duration of the current state, and the election priorities and preemption from show high-availability all.\n\nSource: `show high-availability state` via the PAN-OS XML API, polled every 1 min by default."
         }
       ],
       "title": "HA Role Changes",
@@ -3098,13 +3100,13 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and r.interface == \"${interface}\" and r._field =~ /^(in|out)_octets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: if r._field == \"in_octets\" then \"In\" else \"Out\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.hostname == \"${hostname}\" and r.interface == \"${interface}\" and r._field =~ /^(in|out)_octets$/ and ((r._measurement == \"paloalto_api_interfaces\" and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./) or (r._measurement == \"paloalto_api_logical_interfaces\" and (r.interface !~ /(?i)^ethernet/ or r.interface =~ /\\./))))\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: if r._field == \"in_octets\" then \"In\" else \"Out\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
           "title": "Throughput ${interface}",
           "type": "timeseries",
-          "description": "Repeated automatically for every active physical Ethernet interface returned by the XML API.",
+          "description": "Repeated for every active physical Ethernet port (hardware ibytes/obytes) and every logical interface with counters: subinterfaces, tunnels, VLAN, loopback and aggregate interfaces (ifnet counters of show counter interface all).\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default.",
           "repeat": "interface",
           "repeatDirection": "h",
           "maxPerRow": 2
@@ -3171,13 +3173,13 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and r.interface =~ /^${interface:regex}$/ and r._field =~ /^(in|out)_packets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.interface + (if r._field == \"in_packets\" then \" In\" else \" Out\") }))\n  |> group(columns: [\"_field\"])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.hostname == \"${hostname}\" and r.interface =~ /^${interface:regex}$/ and r._field =~ /^(in|out)_packets$/ and ((r._measurement == \"paloalto_api_interfaces\" and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./) or (r._measurement == \"paloalto_api_logical_interfaces\" and (r.interface !~ /(?i)^ethernet/ or r.interface =~ /\\./))))\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.interface + (if r._field == \"in_packets\" then \" In\" else \" Out\") }))\n  |> group(columns: [\"_field\"])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
           "title": "Packets per Second by Interface",
           "type": "timeseries",
-          "description": ""
+          "description": "Source: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
         },
         {
           "datasource": {
@@ -3221,7 +3223,7 @@
           ],
           "title": "Interface Status",
           "type": "table",
-          "description": "Operational state, negotiated speed, duplex, mode, zone, VSYS and forwarding instance from show interface all, plus the cumulative link-down count."
+          "description": "Operational state, negotiated speed, duplex, mode, zone, VSYS and forwarding instance from show interface all, plus the cumulative link-down count.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter interface all` every 20 s\n- `show interface all` every 1 min"
         }
       ],
       "title": "API Interface Details",
@@ -3285,13 +3287,13 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and r.interface == \"${interface}\" and r._field =~ /^(in_errors|in_discards|out_errors)$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"in_errors\" then \"In Errors\" else if r._field == \"in_discards\" then \"In Discards\" else \"Out Errors\" }))\n  |> group(columns: [\"_field\"])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.hostname == \"${hostname}\" and r.interface == \"${interface}\" and r._field =~ /^(in_errors|in_discards|out_errors)$/ and ((r._measurement == \"paloalto_api_interfaces\" and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./) or (r._measurement == \"paloalto_api_logical_interfaces\" and (r.interface !~ /(?i)^ethernet/ or r.interface =~ /\\./))))\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"in_errors\" then \"In Errors\" else if r._field == \"in_discards\" then \"In Discards\" else \"Out Errors\" }))\n  |> group(columns: [\"_field\"])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
           "title": "Errors / Discards ${interface}",
           "type": "timeseries",
-          "description": "Hardware ingress errors and discards plus MAC-level transmit errors from show counter interface all.",
+          "description": "Ingress errors and discards, plus MAC-level transmit errors on physical ports, from show counter interface all (hardware counters for Ethernet ports, ifnet counters for logical interfaces).\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default.",
           "repeat": "interface",
           "repeatDirection": "h",
           "maxPerRow": 1
@@ -3331,7 +3333,7 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 8,
+            "w": 12,
             "x": 0,
             "y": 61
           },
@@ -3364,7 +3366,63 @@
           ],
           "title": "VSYS Sessions",
           "type": "timeseries",
-          "description": "Sessions per VSYS summed across dataplanes from show session meter. The limit appears when a VSYS session resource limit is configured."
+          "description": "Sessions per VSYS summed across dataplanes from show session meter. The limit appears when a VSYS session resource limit is configured.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show session meter` every 1 min\n- `show session info (per VSYS)` every 1 min"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 61
+          },
+          "id": 13103,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_vsys\" and r.hostname == \"${hostname}\" and r.vsys == \"${vsys}\" and r._field =~ /^(cps|packet_rate_pps)$/)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"cps\" then \"CPS\" else \"Packets/s\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "VSYS CPS",
+          "type": "timeseries",
+          "description": "New sessions per second and packet rate of this VSYS from show session info scoped to the VSYS (SNMP panVsysTotalCps equivalent). PAN-OS exposes no per-zone CPS through the XML API.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show session meter` every 1 min\n- `show session info (per VSYS)` every 1 min"
         },
         {
           "datasource": {
@@ -3387,9 +3445,9 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 16,
-            "x": 8,
-            "y": 61
+            "w": 24,
+            "x": 0,
+            "y": 69
           },
           "id": 13102,
           "options": {
@@ -3420,7 +3478,7 @@
           ],
           "title": "VSYS Throughput by Zone",
           "type": "timeseries",
-          "description": "Logical interface octet counters of this VSYS summed by zone. In is traffic received from the zone."
+          "description": "Logical interface octet counters of this VSYS summed by zone. In is traffic received from the zone.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
         }
       ],
       "title": "VSYS ${vsys}",
@@ -3492,7 +3550,7 @@
           ],
           "title": "Throughput by Zone",
           "type": "timeseries",
-          "description": "Logical interface octet counters summed by zone. In is traffic received from the zone."
+          "description": "Logical interface octet counters summed by zone. In is traffic received from the zone.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
         },
         {
           "datasource": {
@@ -3548,7 +3606,7 @@
           ],
           "title": "Logical Drops by Reason",
           "type": "timeseries",
-          "description": "Per-reason logical interface drops: no route, no ARP/neighbor, flow state, zone change, spoofing, LAND, ping of death, teardrop and ICMP fragments."
+          "description": "Per-reason logical interface drops: no route, no ARP/neighbor, flow state, zone change, spoofing, LAND, ping of death, teardrop and ICMP fragments.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
         },
         {
           "datasource": {
@@ -3604,7 +3662,7 @@
           ],
           "title": "Subinterface / Tunnel / VLAN Throughput",
           "type": "timeseries",
-          "description": "Logical interface counters for subinterfaces, IPsec/GRE tunnels, VLAN and aggregate interfaces."
+          "description": "Logical interface counters for subinterfaces, IPsec/GRE tunnels, VLAN and aggregate interfaces.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
         },
         {
           "datasource": {
@@ -3648,7 +3706,7 @@
           ],
           "title": "Logical Drops by Interface (selected range)",
           "type": "table",
-          "description": "Packets dropped during the selected time range, by logical interface and reason."
+          "description": "Packets dropped during the selected time range, by logical interface and reason.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
         }
       ],
       "title": "Zones, Logical Interfaces and Drop Reasons",
@@ -3740,7 +3798,7 @@
           ],
           "title": "CPU per Core - ${dataplane}",
           "type": "timeseries",
-          "description": "One repeated row is created for every dataplane returned by PAN-OS."
+          "description": "One repeated row is created for every dataplane returned by PAN-OS.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -3798,7 +3856,7 @@
           ],
           "title": "Resource Utilization - ${dataplane}",
           "type": "timeseries",
-          "description": "Session, packet-buffer, packet-descriptor and software-tag pressure reported by resource-monitor."
+          "description": "Session, packet-buffer, packet-descriptor and software-tag pressure reported by resource-monitor.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -3876,7 +3934,7 @@
           ],
           "title": "CPU Summary - ${dataplane}",
           "type": "timeseries",
-          "description": "The all-core average matches SNMP. Cores reporting 0% (not used for packet processing) are excluded from the active-core average, which shows the real load of the packet-processing cores. Hottest core is the busiest one-minute average; the peak series is the highest per-core value sampled within each minute."
+          "description": "The all-core average matches SNMP. Cores reporting 0% (not used for packet processing) are excluded from the active-core average, which shows the real load of the packet-processing cores. Hottest core is the busiest one-minute average; the peak series is the highest per-core value sampled within each minute.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -3929,7 +3987,7 @@
           ],
           "title": "Core Load Map - ${dataplane}",
           "type": "status-history",
-          "description": "One line per core colored by load, readable even on 64+ core dataplanes."
+          "description": "One line per core colored by load, readable even on 64+ core dataplanes.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
         }
       ],
       "title": "Dataplane ${dataplane}",
@@ -4001,7 +4059,7 @@
           ],
           "title": "Sessions by Protocol",
           "type": "timeseries",
-          "description": ""
+          "description": "Source: `show session info` via the PAN-OS XML API, polled every 20 s by default."
         },
         {
           "datasource": {
@@ -4057,7 +4115,7 @@
           ],
           "title": "Packet Rate",
           "type": "timeseries",
-          "description": ""
+          "description": "Source: `show session info` via the PAN-OS XML API, polled every 20 s by default."
         }
       ],
       "title": "API Session Details",
@@ -4127,7 +4185,7 @@
           ],
           "title": "Policy Deny / DoS Drop Rate",
           "type": "timeseries",
-          "description": "Policy denies and DoS protection policy drops, equivalent to the SNMP slowpath / DoS drop panel."
+          "description": "Policy denies and DoS protection policy drops, equivalent to the SNMP slowpath / DoS drop panel.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter global filter severity drop` every 1 min\n- `show counter global filter aspect dos` every 1 min"
         },
         {
           "datasource": {
@@ -4183,7 +4241,7 @@
           ],
           "title": "Zone Protection RED / Flood Drops",
           "type": "timeseries",
-          "description": "Zone protection flood, random early drop and packet-based attack drops."
+          "description": "Zone protection flood, random early drop and packet-based attack drops.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter global filter severity drop` every 1 min\n- `show counter global filter aspect dos` every 1 min"
         },
         {
           "datasource": {
@@ -4239,7 +4297,7 @@
           ],
           "title": "SYN Cookie Counters",
           "type": "timeseries",
-          "description": "SYN cookie activity, collected through the DoS aspect filter because these counters are not all drops."
+          "description": "SYN cookie activity, collected through the DoS aspect filter because these counters are not all drops.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter global filter severity drop` every 1 min\n- `show counter global filter aspect dos` every 1 min"
         },
         {
           "datasource": {
@@ -4295,7 +4353,63 @@
           ],
           "title": "DoS Block Table Entries",
           "type": "timeseries",
-          "description": "Current hardware and software DoS block-table entries. These counters are gauges, not rates."
+          "description": "Current hardware and software DoS block-table entries. These counters are gauges, not rates.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter global filter severity drop` every 1 min\n- `show counter global filter aspect dos` every 1 min"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 83
+          },
+          "id": 13305,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_counters\" and r.hostname == \"${hostname}\" and r._field == \"value\" and r.counter =~ /^(flow_scan_drop|flow_dos_pf_.*|flow_dos_ip6.*|flow_dos_curr_sess_(incr|decr)_failed)$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _field: r.counter }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Scan / Packet-Based Drops",
+          "type": "timeseries",
+          "description": "Scan, packet-based attack (spoofing, fragments, malformed options, IPv6) and DoS session-accounting failures, equivalent to the SNMP scan / packet-based drops panel.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter global filter severity drop` every 1 min\n- `show counter global filter aspect dos` every 1 min"
         }
       ],
       "title": "Data Plane Pressure and Key Drops",
@@ -4365,7 +4479,7 @@
           ],
           "title": "Selected Drop / Failure Counters",
           "type": "timeseries",
-          "description": "PAN-OS severity=drop and DoS-aspect counters; use the Category and Aspect selectors above. Cardinality is bounded by counter_limit."
+          "description": "PAN-OS severity=drop and DoS-aspect counters; use the Category and Aspect selectors above. Cardinality is bounded by counter_limit.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter global filter severity drop` every 1 min\n- `show counter global filter aspect dos` every 1 min"
         },
         {
           "datasource": {
@@ -4409,7 +4523,7 @@
           ],
           "title": "Top Counters (selected range)",
           "type": "table",
-          "description": "Counters that increased the most during the selected range, with the PAN-OS description."
+          "description": "Counters that increased the most during the selected range, with the PAN-OS description.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter global filter severity drop` every 1 min\n- `show counter global filter aspect dos` every 1 min"
         }
       ],
       "title": "Filtered Global Drop Counters",
@@ -4480,7 +4594,7 @@
           ],
           "title": "Log Rate",
           "type": "timeseries",
-          "description": "Logs per second reported by the management-plane log receiver (debug log-receiver statistics): incoming, written and forwarded."
+          "description": "Logs per second reported by the management-plane log receiver (debug log-receiver statistics): incoming, written and forwarded.\n\nSource: `debug log-receiver statistics` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -4537,7 +4651,7 @@
           ],
           "title": "Logs Discarded (rate)",
           "type": "timeseries",
-          "description": "Rate of logs the firewall discarded or dropped, from cumulative logging counters. Any sustained value means logs are lost before reaching disk or the log collector."
+          "description": "Rate of logs the firewall discarded or dropped, from cumulative logging counters. Any sustained value means logs are lost before reaching disk or the log collector.\n\nSource: `debug log-receiver statistics` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -4678,7 +4792,7 @@
           ],
           "title": "Content Versions",
           "type": "table",
-          "description": "Installed content and signature versions, device certificate status, operational mode and multi-VSYS state from show system info."
+          "description": "Installed content and signature versions, device certificate status, operational mode and multi-VSYS state from show system info.\n\nSource: `show system info` via the PAN-OS XML API, polled every hour by default."
         },
         {
           "datasource": {
@@ -4742,7 +4856,7 @@
           ],
           "title": "Processes Not Running",
           "type": "stat",
-          "description": "Management-plane daemons from show system software status that are not running."
+          "description": "Management-plane daemons from show system software status that are not running.\n\nSource: `show system software status` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -4824,7 +4938,7 @@
           ],
           "title": "Management Processes Not Running",
           "type": "table",
-          "description": "Only daemons that are not running are listed; an empty table means every monitored process is up."
+          "description": "Only daemons that are not running are listed; an empty table means every monitored process is up.\n\nSource: `show system software status` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -4884,7 +4998,7 @@
           ],
           "title": "GP Users",
           "type": "stat",
-          "description": "Current GlobalProtect users on the firewall (total without the per-gateway breakdown)."
+          "description": "Current GlobalProtect users on the firewall (total without the per-gateway breakdown).\n\nSource: `show global-protect-gateway statistics` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -4940,7 +5054,7 @@
           ],
           "title": "GlobalProtect Users",
           "type": "timeseries",
-          "description": "Current GlobalProtect users: firewall total plus one series per gateway when the collector reports gateways."
+          "description": "Current GlobalProtect users: firewall total plus one series per gateway when the collector reports gateways.\n\nSource: `show global-protect-gateway statistics` via the PAN-OS XML API, polled every 1 min by default."
         }
       ],
       "title": "Logging and Management Health",
@@ -5010,7 +5124,7 @@
           ],
           "title": "Management Plane Load Average",
           "type": "timeseries",
-          "description": ""
+          "description": "Source: `show system resources` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -5066,7 +5180,7 @@
           ],
           "title": "Management Plane Memory",
           "type": "timeseries",
-          "description": ""
+          "description": "Source: `show system resources` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -5124,7 +5238,7 @@
           ],
           "title": "Storage Usage",
           "type": "timeseries",
-          "description": ""
+          "description": "Source: `show system disk-space` via the PAN-OS XML API, polled every hour by default."
         },
         {
           "datasource": {
@@ -5275,7 +5389,7 @@
           ],
           "title": "Storage Partitions",
           "type": "table",
-          "description": "Partitions from show system disk-space."
+          "description": "Partitions from show system disk-space.\n\nSource: `show system disk-space` via the PAN-OS XML API, polled every hour by default."
         },
         {
           "datasource": {
@@ -5333,7 +5447,7 @@
           ],
           "title": "Management Plane Swap",
           "type": "timeseries",
-          "description": ""
+          "description": "Source: `show system resources` via the PAN-OS XML API, polled every 1 min by default."
         },
         {
           "datasource": {
@@ -5389,7 +5503,7 @@
           ],
           "title": "Top Management Plane Processes",
           "type": "timeseries",
-          "description": "Aggregated by process name to avoid PID cardinality."
+          "description": "Aggregated by process name to avoid PID cardinality.\n\nSource: `show system resources` via the PAN-OS XML API, polled every 1 min by default."
         }
       ],
       "title": "Advanced Resource Troubleshooting - Management Plane",
@@ -5544,14 +5658,14 @@
           "type": "influxdb",
           "uid": "P951FEA4DE68E13C5"
         },
-        "definition": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and r._field == \"state\" and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./)\n  |> group(columns: [\"interface\"])\n  |> last()\n  |> filter(fn: (r) => r._value == \"up\")\n  |> map(fn: (r) => ({ _value: r.interface }))\n  |> group()\n  |> distinct(column: \"_value\")\n  |> sort(columns: [\"_value\"])",
+        "definition": "physical = from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and r._field == \"state\" and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./)\n  |> group(columns: [\"interface\"])\n  |> last()\n  |> filter(fn: (r) => r._value == \"up\")\n  |> map(fn: (r) => ({ _value: r.interface }))\nlogical = from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_logical_interfaces\" and r.hostname == \"${hostname}\" and r._field == \"in_octets\" and (r.interface !~ /(?i)^ethernet/ or r.interface =~ /\\./) and r.interface !~ /(?i)^(internal|hsci|ha[0-9]*|mgmt|management)/)\n  |> group(columns: [\"interface\"])\n  |> last()\n  |> map(fn: (r) => ({ _value: r.interface }))\nunion(tables: [physical, logical])\n  |> group()\n  |> distinct(column: \"_value\")\n  |> sort(columns: [\"_value\"])",
         "hide": 2,
         "includeAll": true,
         "label": "Interface",
         "multi": true,
         "name": "interface",
         "options": [],
-        "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and r._field == \"state\" and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./)\n  |> group(columns: [\"interface\"])\n  |> last()\n  |> filter(fn: (r) => r._value == \"up\")\n  |> map(fn: (r) => ({ _value: r.interface }))\n  |> group()\n  |> distinct(column: \"_value\")\n  |> sort(columns: [\"_value\"])",
+        "query": "physical = from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and r._field == \"state\" and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./)\n  |> group(columns: [\"interface\"])\n  |> last()\n  |> filter(fn: (r) => r._value == \"up\")\n  |> map(fn: (r) => ({ _value: r.interface }))\nlogical = from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_logical_interfaces\" and r.hostname == \"${hostname}\" and r._field == \"in_octets\" and (r.interface !~ /(?i)^ethernet/ or r.interface =~ /\\./) and r.interface !~ /(?i)^(internal|hsci|ha[0-9]*|mgmt|management)/)\n  |> group(columns: [\"interface\"])\n  |> last()\n  |> map(fn: (r) => ({ _value: r.interface }))\nunion(tables: [physical, logical])\n  |> group()\n  |> distinct(column: \"_value\")\n  |> sort(columns: [\"_value\"])",
         "refresh": 2,
         "regex": "",
         "skipUrlSync": true,
