@@ -7,7 +7,14 @@ services:
       options:
         max-size: "25m"
         max-file: "10"
-    ports: ["8086:8086"]
+    # InfluxDB only needs to be reachable from Grafana and Telegraf, which talk
+    # to it over this Compose network (http://influxdb:8086). Binding the
+    # published port to 127.0.0.1 keeps the API - and the admin token it
+    # accepts - off every other network interface on the host. To reach it
+    # from another host (e.g. an external Grafana or Telegraf instance),
+    # change this to "0.0.0.0:8086:8086" or a specific host IP, and make sure
+    # network access to it is otherwise restricted (firewall/VPN).
+    ports: ["127.0.0.1:8086:8086"]
     volumes:
       - ./influxdb-data:/var/lib/influxdb2
     environment:
@@ -18,12 +25,20 @@ services:
       DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET:-firewalls}
       DOCKER_INFLUXDB_INIT_RETENTION: ${INFLUX_RETENTION:-30d}
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:?Set INFLUX_TOKEN in .env}
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   telegraf:
     build: ./telegraf
     restart: unless-stopped
     logging: *default-logging
-    depends_on: [influxdb]
+    depends_on:
+      influxdb:
+        condition: service_healthy
     environment:
       INFLUX_TOKEN: ${INFLUX_TOKEN:?Set INFLUX_TOKEN in .env}
       INFLUX_ORG: ${INFLUX_ORG:-netops}
@@ -38,7 +53,25 @@ services:
       - ./logs/telegraf:/var/log/telegraf
 
   grafana:
-    image: grafana/grafana:11.1.4
+    # grafana/grafana:11.1.4 (Aug 2024) is out of support and affected by later
+    # CVEs, including CVE-2026-27876. Pinned to 13.2.2 (latest 13.x patch as of
+    # Sep 2026): this stack only uses React panels (timeseries, stat, table,
+    # state-timeline, status-history, and the text panel in HTML mode with
+    # inline `style` attributes and `${var:text}` interpolation), file-based
+    # provisioning (dashboards.yaml / influxdb.yaml with secureJsonData.token),
+    # GF_SECURITY_ADMIN_* env vars, and the built-in InfluxDB Flux data source
+    # - none of which are affected by the 11->13 breaking changes (HTML
+    # sanitization of the text panel is unchanged since Grafana 6.x; Flux
+    # remains supported via the bundled InfluxDB data source; the file
+    # provisioning schema for hand-authored, legacy schemaVersion dashboard
+    # JSON - as used in this repo - is unaffected by Grafana 13's move to
+    # unified storage, which only broke re-importing dashboards freshly
+    # exported from the v13 GUI). SQLite/unified-storage migrations run
+    # automatically at container startup, so no intermediate version is
+    # required for the 11.1 -> 13.2 jump. If you prefer smaller hops instead:
+    # 11.1.4 -> 11.6.x (last supported 11.x) -> 12.4.x (last supported 12.x,
+    # still receiving security patches) -> 13.2.x.
+    image: grafana/grafana:13.2.2
     restart: unless-stopped
     logging: *default-logging
     ports: ["3000:3000"]
@@ -46,9 +79,18 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       INFLUX_TOKEN: ${INFLUX_TOKEN:?Set INFLUX_TOKEN in .env}
       INFLUX_ORG: ${INFLUX_ORG:-netops}
       INFLUX_BUCKET: ${INFLUX_BUCKET:-firewalls}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
