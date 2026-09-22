@@ -22,6 +22,7 @@
 - Generated enriched inventory now redacts SNMP and API credentials and uses mode `0600`; the protected Telegraf runtime environment contains only required monitoring secrets, generated `telegraf.conf` no longer contains clear-text SNMP credentials, and `.env` is automatically restricted to mode `0600`.
 - Added a security policy and a scoped, expiring risk acceptance for the gRPC-Go denial-of-service finding embedded in the latest Telegraf release; the shipped stack exposes no gRPC listener.
 - The custom Telegraf image now declares its unprivileged runtime user explicitly and no longer installs the unnecessary `nano` package.
+- Replaced the Debian-based Telegraf runtime with the official Alpine 3.23 variant. Standard IANA/IETF MIB text files are retained through a build-only stage, reducing the runtime HIGH/CRITICAL scan from 126 findings to the single documented upstream gRPC-Go finding; CI now smoke-tests the runtime UID and chassis MIB translations.
 
 ## 1.1.0 - 2026-09-22
 

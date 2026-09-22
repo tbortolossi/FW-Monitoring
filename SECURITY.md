@@ -32,3 +32,5 @@ The image scan always reports every HIGH and CRITICAL finding. It blocks release
 - the exception is restricted to `/usr/bin/telegraf` and expires automatically.
 
 The exception must be removed immediately when a stable upstream Telegraf image includes the fixed dependency. Expiry must not be extended without a new review.
+
+The runtime image uses the official Alpine variant to minimize the installed operating-system package set. Debian is used only as a disposable build stage for downloading standard MIB text files; no Debian executable, library, or package database is copied into the runtime image.
