@@ -1,46 +1,79 @@
-{{- range $fw := .firewalls }}
-{{- if eq ($fw.vendor | default "paloalto") "paloalto" }}
-###############################################################################
-# {{$fw.hostname}} ({{$fw.host}}) - Palo Alto
-###############################################################################
-[[inputs.snmp]]
-  agents = ["udp://{{ $fw.host }}:161"]
-  version = {{ $fw.snmp_version }}
+{#
+  inputs_paloalto.tmpl - Palo Alto SNMP inputs (plain Jinja2).
+
+  Polling layout: every Palo Alto firewall gets TWO [[inputs.snmp]] instances
+  that share the same agent, credentials and [inputs.snmp.tags].
+
+  1. Fast instance, agent interval (20s), measurement name "pan_system":
+     pan_system scalars (one GET per request of up to 60 OIDs), interfaces,
+     pan_hr_processors, vsys, pan_zones, pan_interfaces_cps (PAN-OS 10.2+)
+     and pan_interface_utilization (PAN-OS 12.1+). This is the capacity/load
+     data the dashboards read: CPU, RAM, sessions, CPS, interface counters.
+
+  2. Slow instance, interval = "60s", measurement name "pan_global_counters":
+     the PAN-OS global counters are scalars (.0), so they are top-level
+     [[inputs.snmp.field]] entries fetched with a couple of GET requests
+     instead of one SNMP walk per counter (~93 walks every 20s before). The
+     instance name is what keeps them in the "pan_global_counters"
+     measurement, which is why pan_system scalars stay in the fast instance.
+     The same instance also walks the slow-moving tables: pan_hr_storage,
+     pan_hr_devices, pan_pa_cluster and, in chassis mode, the ENTITY,
+     ENTITY-SENSOR, ENTITY-STATE and PAN-ENTITY-EXT tables.
+
+  Both instances use max_repetitions = 25 so each GETBULK round trip returns
+  more table rows. Measurement, field and tag names are part of the dashboard
+  contract: keep them unchanged. Every measurement carries the "hostname" tag
+  (sysName.0 in each instance, inherited by tables through inherit_tags).
+#}
+{% macro snmp_agent(fw) %}
+  agents = ["udp://{{ fw.host }}:161"]
+  version = {{ fw.snmp_version }}
   agent_host_tag = "source"
-  {{- if eq $fw.snmp_version 2 }}
-  community = "{{ $fw.community }}"
-  {{- else if eq $fw.snmp_version 3 }}
-  sec_name = "{{ $fw.username }}"
-  auth_protocol = "{{ $fw.telegraf_auth_protocol }}"
-  auth_password = "{{ $fw.auth_password }}"
-  priv_protocol = "{{ $fw.telegraf_priv_protocol }}"
-  priv_password = "{{ $fw.priv_password }}"
+  {% if fw.get('snmp_version') == 2 %}
+  community = "{{ fw.community }}"
+  {% elif fw.get('snmp_version') == 3 %}
+  sec_name = "{{ fw.username }}"
+  auth_protocol = "{{ fw.telegraf_auth_protocol }}"
+  auth_password = "{{ fw.auth_password }}"
+  priv_protocol = "{{ fw.telegraf_priv_protocol }}"
+  priv_password = "{{ fw.priv_password }}"
   sec_level = "authPriv"
-  {{- end }}
-
-  name = "pan_system"
-  timeout = "5s"
-  retries = 3
-
+  {% endif %}
+{%- endmacro %}
+{% macro snmp_tags(fw) %}
   [inputs.snmp.tags]
     vendor = "paloalto"
-    {{- if ($fw.cluster | default "") }}
-    cluster = "{{ $fw.cluster }}"
-    {{- end }}
-    {{- if ($fw.model | default "") }}
-    model = "{{ $fw.model }}"
-    {{- end }}
-    {{- if ($fw.chassis_model | default "") }}
-    chassis_model = "{{ $fw.chassis_model }}"
-    {{- end }}
-    {{- if ($fw.chassis_family | default "") }}
-    chassis_family = "{{ $fw.chassis_family }}"
-    {{- end }}
+    {% if fw.get('cluster') %}
+    cluster = "{{ fw.cluster }}"
+    {% endif %}
+    {% if fw.get('model') %}
+    model = "{{ fw.model }}"
+    {% endif %}
+    {% if fw.get('chassis_model') %}
+    chassis_model = "{{ fw.chassis_model }}"
+    {% endif %}
+    {% if fw.get('chassis_family') %}
+    chassis_family = "{{ fw.chassis_family }}"
+    {% endif %}
 
   [[inputs.snmp.field]]
     oid    = "RFC1213-MIB::sysName.0"
     name   = "hostname"
     is_tag = true
+{%- endmacro %}
+{% for fw in firewalls %}
+{% if fw.get('vendor', 'paloalto') == 'paloalto' %}
+###############################################################################
+# {{ fw.hostname }} ({{ fw.host }}) - Palo Alto - fast polling (agent interval)
+###############################################################################
+[[inputs.snmp]]
+{{ snmp_agent(fw) }}
+  name = "pan_system"
+  timeout = "5s"
+  retries = 3
+  max_repetitions = 25
+
+{{ snmp_tags(fw) }}
 
   [[inputs.snmp.field]]
     oid  = "RFC1213-MIB::sysDescr.0"
@@ -133,6 +166,19 @@
   [[inputs.snmp.field]]
     oid  = "PAN-COMMON-MIB::panGPGWUtilizationActiveTunnels.0"
     name = "gp_gateway_active_tunnels"
+  {% if fw.get('chassis') and fw.get('pan_entity_ext') %}
+
+  # PAN-ENTITY-EXT-MIB is documented for PA-7000 Series and PA-5450.
+  # Chassis power totals are scalars and stay in the pan_system measurement;
+  # the per-module PAN-ENTITY-EXT tables are polled by the slow instance.
+  [[inputs.snmp.field]]
+    oid  = "PAN-ENTITY-EXT-MIB::panEntityTotalPowerAvail.0"
+    name = "power_available_watts"
+
+  [[inputs.snmp.field]]
+    oid  = "PAN-ENTITY-EXT-MIB::panEntityTotalPowerUsed.0"
+    name = "power_used_watts"
+  {% endif %}
 
   [[inputs.snmp.table]]
     name         = "interfaces"
@@ -141,6 +187,8 @@
 
     # Global throughput should be calculated from interface octet
     # counters because offloaded traffic may bypass dataplane counters.
+    # Counter64 values are returned as unsigned integers without any
+    # conversion option.
     [[inputs.snmp.table.field]]
       oid    = "IF-MIB::ifName"
       name   = "ifName"
@@ -182,44 +230,36 @@
       name = "ifMtu"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCInOctets"
-      name      = "ifHCInOctets"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCInOctets"
+      name = "ifHCInOctets"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCOutOctets"
-      name      = "ifHCOutOctets"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCOutOctets"
+      name = "ifHCOutOctets"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCInUcastPkts"
-      name      = "ifHCInUcastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCInUcastPkts"
+      name = "ifHCInUcastPkts"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCOutUcastPkts"
-      name      = "ifHCOutUcastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCOutUcastPkts"
+      name = "ifHCOutUcastPkts"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCInMulticastPkts"
-      name      = "ifHCInMulticastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCInMulticastPkts"
+      name = "ifHCInMulticastPkts"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCOutMulticastPkts"
-      name      = "ifHCOutMulticastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCOutMulticastPkts"
+      name = "ifHCOutMulticastPkts"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCInBroadcastPkts"
-      name      = "ifHCInBroadcastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCInBroadcastPkts"
+      name = "ifHCInBroadcastPkts"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCOutBroadcastPkts"
-      name      = "ifHCOutBroadcastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCOutBroadcastPkts"
+      name = "ifHCOutBroadcastPkts"
 
     [[inputs.snmp.table.field]]
       oid  = "IF-MIB::ifInErrors"
@@ -238,65 +278,12 @@
       name = "ifOutDiscards"
 
   [[inputs.snmp.table]]
-    name         = "pan_hr_storage"
-    inherit_tags = ["hostname"]
-    oid          = "HOST-RESOURCES-MIB::hrStorageTable"
-
-    [[inputs.snmp.table.field]]
-      oid    = "HOST-RESOURCES-MIB::hrStorageIndex"
-      name   = "storage_index"
-      is_tag = true
-
-    [[inputs.snmp.table.field]]
-      oid    = "HOST-RESOURCES-MIB::hrStorageDescr"
-      name   = "storage_descr"
-      is_tag = true
-
-    [[inputs.snmp.table.field]]
-      oid  = "HOST-RESOURCES-MIB::hrStorageAllocationUnits"
-      name = "allocation_units"
-
-    [[inputs.snmp.table.field]]
-      oid  = "HOST-RESOURCES-MIB::hrStorageSize"
-      name = "storage_size"
-
-    [[inputs.snmp.table.field]]
-      oid  = "HOST-RESOURCES-MIB::hrStorageUsed"
-      name = "storage_used"
-
-    {{- if ($fw.panos_11_2_metrics | default false) }}
-    [[inputs.snmp.table.field]]
-      oid  = "PAN-COMMON-MIB::panhrStorageUsage"
-      name = "storage_usage_pct"
-    {{- end }}
-
-  [[inputs.snmp.table]]
-    name         = "pan_hr_devices"
-    inherit_tags = ["hostname"]
-    oid          = "HOST-RESOURCES-MIB::hrDeviceTable"
-
-    [[inputs.snmp.table.field]]
-      oid    = "HOST-RESOURCES-MIB::hrDeviceIndex"
-      name   = "device_index"
-      is_tag = true
-
-    [[inputs.snmp.table.field]]
-      oid    = "HOST-RESOURCES-MIB::hrDeviceDescr"
-      name   = "device_descr"
-      is_tag = true
-
-    [[inputs.snmp.table.field]]
-      oid  = "HOST-RESOURCES-MIB::hrDeviceStatus"
-      name = "device_status"
-
-    [[inputs.snmp.table.field]]
-      oid  = "HOST-RESOURCES-MIB::hrDeviceErrors"
-      name = "device_errors"
-
-  [[inputs.snmp.table]]
     name         = "pan_hr_processors"
     inherit_tags = ["hostname"]
     oid          = "HOST-RESOURCES-MIB::hrProcessorTable"
+    # Both tags carry the hrDeviceIndex of each processor: "index" comes
+    # from index_as_tag and "device_index" from the explicit field below.
+    # They are kept together because existing dashboards may use either.
     index_as_tag = true
 
     [[inputs.snmp.table.field]]
@@ -308,6 +295,9 @@
       oid  = "HOST-RESOURCES-MIB::hrProcessorLoad"
       name = "processor_load_pct"
 
+  # The vsys table is always polled, even when no multi-vsys configuration
+  # was detected (vsys_detected): single-vsys firewalls still return vsys1,
+  # which gives the dashboards a consistent per-vsys sessions/CPS view.
   [[inputs.snmp.table]]
     name = "vsys"
     oid = "PAN-COMMON-MIB::panVsysTable"
@@ -346,13 +336,38 @@
     [[inputs.snmp.table.field]]
       name = "other_ip_cps"
       oid = "PAN-COMMON-MIB::panVsysActiveOtherIpCps"
+    {% if fw.get('vsys_total_cps') and fw.get('panos_12_metrics') %}
 
-    {{- if and ($fw.vsys_total_cps | default false) ($fw.panos_12_metrics | default false) }}
     [[inputs.snmp.table.field]]
       name = "total_cps"
       oid = "PAN-COMMON-MIB::panVsysTotalCps"
-    {{- end }}
+    {% endif %}
 
+  [[inputs.snmp.table]]
+    name         = "pan_zones"
+    inherit_tags = ["hostname"]
+    oid          = "PAN-COMMON-MIB::panZoneTable"
+    index_as_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid    = "PAN-COMMON-MIB::panZoneName"
+      name   = "zone"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid  = "PAN-COMMON-MIB::panZoneActiveTcpCps"
+      name = "tcp_cps"
+
+    [[inputs.snmp.table.field]]
+      oid  = "PAN-COMMON-MIB::panZoneActiveUdpCps"
+      name = "udp_cps"
+
+    [[inputs.snmp.table.field]]
+      oid  = "PAN-COMMON-MIB::panZoneActiveOtherIpCps"
+      name = "other_ip_cps"
+  {% if fw.get('panos_10_2_metrics') %}
+
+  # PAN-OS 10.2+ per-interface CPS (panIfTable).
   [[inputs.snmp.table]]
     name         = "pan_interfaces_cps"
     inherit_tags = ["hostname"]
@@ -375,8 +390,8 @@
     [[inputs.snmp.table.field]]
       name = "other_ip_cps"
       oid  = "PAN-COMMON-MIB::panIfActiveOtherIpCps"
-
-  {{- if ($fw.interface_utilization | default false) }}
+  {% endif %}
+  {% if fw.get('interface_utilization') %}
 
   # PAN-OS 12.1+ native interface utilization in bytes/s and packets/s.
   # For cross-version dashboards, IF-MIB counters remain the source of
@@ -397,30 +412,471 @@
       is_tag = true
 
     [[inputs.snmp.table.field]]
-      name      = "in_bytes_per_sec"
-      oid       = "PAN-COMMON-MIB::ifHCInOctetsUtilization"
-      data_type = "counter64"
+      name = "in_bytes_per_sec"
+      oid  = "PAN-COMMON-MIB::ifHCInOctetsUtilization"
 
     [[inputs.snmp.table.field]]
-      name      = "out_bytes_per_sec"
-      oid       = "PAN-COMMON-MIB::ifHCOutOctetsUtilization"
-      data_type = "counter64"
+      name = "out_bytes_per_sec"
+      oid  = "PAN-COMMON-MIB::ifHCOutOctetsUtilization"
 
     [[inputs.snmp.table.field]]
-      name      = "in_unicast_pkts_per_sec"
-      oid       = "PAN-COMMON-MIB::ifHCInUcastPktsUtilization"
-      data_type = "counter64"
+      name = "in_unicast_pkts_per_sec"
+      oid  = "PAN-COMMON-MIB::ifHCInUcastPktsUtilization"
 
     [[inputs.snmp.table.field]]
-      name      = "out_unicast_pkts_per_sec"
-      oid       = "PAN-COMMON-MIB::ifHCOutUcastPktsUtilization"
-      data_type = "counter64"
+      name = "out_unicast_pkts_per_sec"
+      oid  = "PAN-COMMON-MIB::ifHCOutUcastPktsUtilization"
+  {% endif %}
 
-  {{- end }}
+###############################################################################
+# {{ fw.hostname }} ({{ fw.host }}) - Palo Alto - slow polling (60s)
+###############################################################################
+[[inputs.snmp]]
+{{ snmp_agent(fw) }}
+  name = "pan_global_counters"
+  interval = "60s"
+  timeout = "5s"
+  retries = 2
+  max_repetitions = 25
 
-  {{- if ($fw.panos_11_2_metrics | default false) }}
+{{ snmp_tags(fw) }}
 
-  # PAN-OS 11.2+ PA cluster summary/utilization objects.
+  # A small useful subset of PAN-OS global counters, fetched with GET.
+  # These are not used for throughput; throughput should come from
+  # interface octet counters because offloaded traffic may bypass DP counters.
+  [[inputs.snmp.field]]
+    name = "panFlowIpfragFragErr"
+    oid  = "PAN-COMMON-MIB::panFlowIpfragFragErr.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowIpfragRecv"
+    oid  = "PAN-COMMON-MIB::panFlowIpfragRecv.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowPolicyDeny"
+    oid  = "PAN-COMMON-MIB::panFlowPolicyDeny.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosBlkNumEntries"
+    oid  = "PAN-COMMON-MIB::panFlowDosBlkNumEntries.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosBlkSwEntries"
+    oid  = "PAN-COMMON-MIB::panFlowDosBlkSwEntries.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosBlkHwEntries"
+    oid  = "PAN-COMMON-MIB::panFlowDosBlkHwEntries.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosDropIpBlocked"
+    oid  = "PAN-COMMON-MIB::panFlowDosDropIpBlocked.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRuleDrop"
+    oid  = "PAN-COMMON-MIB::panFlowDosRuleDrop.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosAgMaxSessLimit"
+    oid  = "PAN-COMMON-MIB::panFlowDosAgMaxSessLimit.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosClMaxSessLimit"
+    oid  = "PAN-COMMON-MIB::panFlowDosClMaxSessLimit.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosClSyncookieAckErr"
+    oid  = "PAN-COMMON-MIB::panFlowDosClSyncookieAckErr.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosClSyncookieAckRcv"
+    oid  = "PAN-COMMON-MIB::panFlowDosClSyncookieAckRcv.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosClSyncookieBlkDur"
+    oid  = "PAN-COMMON-MIB::panFlowDosClSyncookieBlkDur.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosClSyncookieMax"
+    oid  = "PAN-COMMON-MIB::panFlowDosClSyncookieMax.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosClSyncookieSent"
+    oid  = "PAN-COMMON-MIB::panFlowDosClSyncookieSent.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowMeterVsysThrottle"
+    oid  = "PAN-COMMON-MIB::panFlowMeterVsysThrottle.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowPolicyNat"
+    oid  = "PAN-COMMON-MIB::panFlowPolicyNat.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowScanDrop"
+    oid  = "PAN-COMMON-MIB::panFlowScanDrop.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRedIcmp"
+    oid  = "PAN-COMMON-MIB::panFlowDosRedIcmp.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRedIcmp6"
+    oid  = "PAN-COMMON-MIB::panFlowDosRedIcmp6.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRedIp"
+    oid  = "PAN-COMMON-MIB::panFlowDosRedIp.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRedTcp"
+    oid  = "PAN-COMMON-MIB::panFlowDosRedTcp.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRedUdp"
+    oid  = "PAN-COMMON-MIB::panFlowDosRedUdp.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRuleAgBlkDur"
+    oid  = "PAN-COMMON-MIB::panFlowDosRuleAgBlkDur.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRuleAgRedAct"
+    oid  = "PAN-COMMON-MIB::panFlowDosRuleAgRedAct.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRuleAgRedMax"
+    oid  = "PAN-COMMON-MIB::panFlowDosRuleAgRedMax.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRuleDeny"
+    oid  = "PAN-COMMON-MIB::panFlowDosRuleDeny.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRuleDropAggr"
+    oid  = "PAN-COMMON-MIB::panFlowDosRuleDropAggr.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRuleDropClBlkDur"
+    oid  = "PAN-COMMON-MIB::panFlowDosRuleDropClBlkDur.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRuleDropClRedAct"
+    oid  = "PAN-COMMON-MIB::panFlowDosRuleDropClRedAct.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRuleDropClRedMax"
+    oid  = "PAN-COMMON-MIB::panFlowDosRuleDropClRedMax.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosRuleDropClassified"
+    oid  = "PAN-COMMON-MIB::panFlowDosRuleDropClassified.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosSyncookieBlkDur"
+    oid  = "PAN-COMMON-MIB::panFlowDosSyncookieBlkDur.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosSyncookieMax"
+    oid  = "PAN-COMMON-MIB::panFlowDosSyncookieMax.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosZoneRedAct"
+    oid  = "PAN-COMMON-MIB::panFlowDosZoneRedAct.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosZoneRedMax"
+    oid  = "PAN-COMMON-MIB::panFlowDosZoneRedMax.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosSyncookieNotTcpSyn"
+    oid  = "PAN-COMMON-MIB::panFlowDosSyncookieNotTcpSyn.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosSyncookieNotTcpSynAck"
+    oid  = "PAN-COMMON-MIB::panFlowDosSyncookieNotTcpSynAck.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfIpspoof"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfIpspoof.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfIpfrag"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfIpfrag.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfPing0"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfPing0.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfIcmpfrag"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfIcmpfrag.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfIcmplpkt"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfIcmplpkt.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfIcmperr"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfIcmperr.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfNoreplyttl"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfNoreplyttl.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfNoreplyneedfrag"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfNoreplyneedfrag.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfStrictsource"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfStrictsource.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfLoosesource"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfLoosesource.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfTimestamp"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfTimestamp.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfRecordroute"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfRecordroute.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfSecurity"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfSecurity.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfSatnetid"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfSatnetid.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfUnknown"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfUnknown.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfBadoption"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfBadoption.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfTcpoverlappingmismatch"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfTcpoverlappingmismatch.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfStrictip"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfStrictip.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfTcpsplithandshake"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfTcpsplithandshake.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfTcpsyndata"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfTcpsyndata.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPfTcpsynackdata"
+    oid  = "PAN-COMMON-MIB::panFlowDosPfTcpsynackdata.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6Route0"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6Route0.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6Route1"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6Route1.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6Route3"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6Route3.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6Route4to252"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6Route4to252.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6Route253"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6Route253.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6Route254"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6Route254.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6Route255"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6Route255.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6Ip4cmpt"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6Ip4cmpt.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6Acast"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6Acast.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6OptionsInvalidIPv6"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6OptionsInvalidIPv6.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6Icmpv6ErrorInvalid"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6Icmpv6ErrorInvalid.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6NeedlessIpv6FragHdr"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6NeedlessIpv6FragHdr.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6RsvdSet"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6RsvdSet.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIPv6ExtHdrHopByHop"
+    oid  = "PAN-COMMON-MIB::panFlowDosIPv6ExtHdrHopByHop.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosip6IPv6ExtHdrRouting"
+    oid  = "PAN-COMMON-MIB::panFlowDosip6IPv6ExtHdrRouting.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosIp6IPv6ExtHdrDestOpt"
+    oid  = "PAN-COMMON-MIB::panFlowDosIp6IPv6ExtHdrDestOpt.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosCurrSessIncrFailed"
+    oid  = "PAN-COMMON-MIB::panFlowDosCurrSessIncrFailed.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosCurrSessDecrFailed"
+    oid  = "PAN-COMMON-MIB::panFlowDosCurrSessDecrFailed.0"
+
+  [[inputs.snmp.field]]
+    name = "panTcpAllocWqeFailed"
+    oid  = "PAN-COMMON-MIB::panTcpAllocWqeFailed.0"
+
+  [[inputs.snmp.field]]
+    name = "panTcpDeny"
+    oid  = "PAN-COMMON-MIB::panTcpDeny.0"
+
+  [[inputs.snmp.field]]
+    name = "panTcpDropOutOfWnd"
+    oid  = "PAN-COMMON-MIB::panTcpDropOutOfWnd.0"
+
+  [[inputs.snmp.field]]
+    name = "panTcpDropPacket"
+    oid  = "PAN-COMMON-MIB::panTcpDropPacket.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowActionClose"
+    oid  = "PAN-COMMON-MIB::panFlowActionClose.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowActionReset"
+    oid  = "PAN-COMMON-MIB::panFlowActionReset.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowTcpNonSyn"
+    oid  = "PAN-COMMON-MIB::panFlowTcpNonSyn.0"
+
+  [[inputs.snmp.field]]
+    name = "panTcpExceedSegLimit"
+    oid  = "PAN-COMMON-MIB::panTcpExceedSegLimit.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowDosPbpDrop"
+    oid  = "PAN-COMMON-MIB::panFlowDosPbpDrop.0"
+
+  [[inputs.snmp.field]]
+    name = "panPktAllocFailure"
+    oid  = "PAN-COMMON-MIB::panPktAllocFailure.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowFwdL3TtlZero"
+    oid  = "PAN-COMMON-MIB::panFlowFwdL3TtlZero.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowMeterHostThrottle"
+    oid  = "PAN-COMMON-MIB::panFlowMeterHostThrottle.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowHostServiceDeny"
+    oid  = "PAN-COMMON-MIB::panFlowHostServiceDeny.0"
+
+  [[inputs.snmp.field]]
+    name = "panFlowHostServiceUnknown"
+    oid  = "PAN-COMMON-MIB::panFlowHostServiceUnknown.0"
+
+  [[inputs.snmp.field]]
+    name = "panPktAllocFailureCos"
+    oid  = "PAN-COMMON-MIB::panPktAllocFailureCos.0"
+
+  [[inputs.snmp.field]]
+    name = "panSessionDiscard"
+    oid  = "PAN-COMMON-MIB::panSessionDiscard.0"
+  [[inputs.snmp.table]]
+    name         = "pan_hr_storage"
+    inherit_tags = ["hostname"]
+    oid          = "HOST-RESOURCES-MIB::hrStorageTable"
+
+    [[inputs.snmp.table.field]]
+      oid    = "HOST-RESOURCES-MIB::hrStorageIndex"
+      name   = "storage_index"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid    = "HOST-RESOURCES-MIB::hrStorageDescr"
+      name   = "storage_descr"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid  = "HOST-RESOURCES-MIB::hrStorageAllocationUnits"
+      name = "allocation_units"
+
+    [[inputs.snmp.table.field]]
+      oid  = "HOST-RESOURCES-MIB::hrStorageSize"
+      name = "storage_size"
+
+    [[inputs.snmp.table.field]]
+      oid  = "HOST-RESOURCES-MIB::hrStorageUsed"
+      name = "storage_used"
+    {% if fw.get('panos_11_2_metrics') %}
+
+    # PAN-OS 11.2+ storage usage percentage.
+    [[inputs.snmp.table.field]]
+      oid  = "PAN-COMMON-MIB::panhrStorageUsage"
+      name = "storage_usage_pct"
+    {% endif %}
+
+  [[inputs.snmp.table]]
+    name         = "pan_hr_devices"
+    inherit_tags = ["hostname"]
+    oid          = "HOST-RESOURCES-MIB::hrDeviceTable"
+
+    [[inputs.snmp.table.field]]
+      oid    = "HOST-RESOURCES-MIB::hrDeviceIndex"
+      name   = "device_index"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid    = "HOST-RESOURCES-MIB::hrDeviceDescr"
+      name   = "device_descr"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid  = "HOST-RESOURCES-MIB::hrDeviceStatus"
+      name = "device_status"
+
+    [[inputs.snmp.table.field]]
+      oid  = "HOST-RESOURCES-MIB::hrDeviceErrors"
+      name = "device_errors"
+  {% if fw.get('pa_cluster') %}
+
+  # PAN-OS 11.2+ PA cluster summary/utilization objects. Opt-in with
+  # pa_cluster: true because some PAN-OS releases stall snmpd on them.
+  # These columns span several tables that share the node index, so the
+  # table has no single oid and each column is walked separately.
   # Keep interface counters as the primary source for throughput.
   [[inputs.snmp.table]]
     name         = "pan_pa_cluster"
@@ -467,412 +923,8 @@
     [[inputs.snmp.table.field]]
       name = "local_sessions_max"
       oid  = "PAN-COMMON-MIB::panPAClusterLocalSessStatsEntryMax"
-
-  {{- end }}
-
-  # A small useful subset of PAN-OS global counters.
-  # These are not used for throughput; throughput should come from
-  # interface octet counters because offloaded traffic may bypass DP counters.
-  [[inputs.snmp.table]]
-    name         = "pan_global_counters"
-    inherit_tags = ["hostname"]
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowIpfragFragErr"
-      oid  = "PAN-COMMON-MIB::panFlowIpfragFragErr"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowIpfragRecv"
-      oid  = "PAN-COMMON-MIB::panFlowIpfragRecv"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowPolicyDeny"
-      oid  = "PAN-COMMON-MIB::panFlowPolicyDeny"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosBlkNumEntries"
-      oid  = "PAN-COMMON-MIB::panFlowDosBlkNumEntries"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosBlkSwEntries"
-      oid  = "PAN-COMMON-MIB::panFlowDosBlkSwEntries"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosBlkHwEntries"
-      oid  = "PAN-COMMON-MIB::panFlowDosBlkHwEntries"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosDropIpBlocked"
-      oid  = "PAN-COMMON-MIB::panFlowDosDropIpBlocked"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRuleDrop"
-      oid  = "PAN-COMMON-MIB::panFlowDosRuleDrop"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosAgMaxSessLimit"
-      oid  = "PAN-COMMON-MIB::panFlowDosAgMaxSessLimit"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosClMaxSessLimit"
-      oid  = "PAN-COMMON-MIB::panFlowDosClMaxSessLimit"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosClSyncookieAckErr"
-      oid  = "PAN-COMMON-MIB::panFlowDosClSyncookieAckErr"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosClSyncookieAckRcv"
-      oid  = "PAN-COMMON-MIB::panFlowDosClSyncookieAckRcv"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosClSyncookieBlkDur"
-      oid  = "PAN-COMMON-MIB::panFlowDosClSyncookieBlkDur"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosClSyncookieMax"
-      oid  = "PAN-COMMON-MIB::panFlowDosClSyncookieMax"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosClSyncookieSent"
-      oid  = "PAN-COMMON-MIB::panFlowDosClSyncookieSent"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowMeterVsysThrottle"
-      oid  = "PAN-COMMON-MIB::panFlowMeterVsysThrottle"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowPolicyNat"
-      oid  = "PAN-COMMON-MIB::panFlowPolicyNat"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowScanDrop"
-      oid  = "PAN-COMMON-MIB::panFlowScanDrop"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRedIcmp"
-      oid  = "PAN-COMMON-MIB::panFlowDosRedIcmp"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRedIcmp6"
-      oid  = "PAN-COMMON-MIB::panFlowDosRedIcmp6"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRedIp"
-      oid  = "PAN-COMMON-MIB::panFlowDosRedIp"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRedTcp"
-      oid  = "PAN-COMMON-MIB::panFlowDosRedTcp"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRedUdp"
-      oid  = "PAN-COMMON-MIB::panFlowDosRedUdp"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRuleAgBlkDur"
-      oid  = "PAN-COMMON-MIB::panFlowDosRuleAgBlkDur"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRuleAgRedAct"
-      oid  = "PAN-COMMON-MIB::panFlowDosRuleAgRedAct"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRuleAgRedMax"
-      oid  = "PAN-COMMON-MIB::panFlowDosRuleAgRedMax"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRuleDeny"
-      oid  = "PAN-COMMON-MIB::panFlowDosRuleDeny"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRuleDropAggr"
-      oid  = "PAN-COMMON-MIB::panFlowDosRuleDropAggr"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRuleDropClBlkDur"
-      oid  = "PAN-COMMON-MIB::panFlowDosRuleDropClBlkDur"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRuleDropClRedAct"
-      oid  = "PAN-COMMON-MIB::panFlowDosRuleDropClRedAct"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRuleDropClRedMax"
-      oid  = "PAN-COMMON-MIB::panFlowDosRuleDropClRedMax"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosRuleDropClassified"
-      oid  = "PAN-COMMON-MIB::panFlowDosRuleDropClassified"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosSyncookieBlkDur"
-      oid  = "PAN-COMMON-MIB::panFlowDosSyncookieBlkDur"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosSyncookieMax"
-      oid  = "PAN-COMMON-MIB::panFlowDosSyncookieMax"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosZoneRedAct"
-      oid  = "PAN-COMMON-MIB::panFlowDosZoneRedAct"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosZoneRedMax"
-      oid  = "PAN-COMMON-MIB::panFlowDosZoneRedMax"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosSyncookieNotTcpSyn"
-      oid  = "PAN-COMMON-MIB::panFlowDosSyncookieNotTcpSyn"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosSyncookieNotTcpSynAck"
-      oid  = "PAN-COMMON-MIB::panFlowDosSyncookieNotTcpSynAck"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfIpspoof"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfIpspoof"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfIpfrag"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfIpfrag"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfPing0"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfPing0"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfIcmpfrag"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfIcmpfrag"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfIcmplpkt"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfIcmplpkt"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfIcmperr"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfIcmperr"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfNoreplyttl"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfNoreplyttl"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfNoreplyneedfrag"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfNoreplyneedfrag"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfStrictsource"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfStrictsource"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfLoosesource"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfLoosesource"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfTimestamp"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfTimestamp"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfRecordroute"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfRecordroute"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfSecurity"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfSecurity"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfSatnetid"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfSatnetid"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfUnknown"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfUnknown"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfBadoption"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfBadoption"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfTcpoverlappingmismatch"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfTcpoverlappingmismatch"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfStrictip"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfStrictip"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfTcpsplithandshake"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfTcpsplithandshake"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfTcpsyndata"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfTcpsyndata"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPfTcpsynackdata"
-      oid  = "PAN-COMMON-MIB::panFlowDosPfTcpsynackdata"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6Route0"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6Route0"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6Route1"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6Route1"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6Route3"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6Route3"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6Route4to252"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6Route4to252"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6Route253"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6Route253"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6Route254"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6Route254"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6Route255"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6Route255"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6Ip4cmpt"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6Ip4cmpt"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6Acast"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6Acast"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6OptionsInvalidIPv6"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6OptionsInvalidIPv6"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6Icmpv6ErrorInvalid"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6Icmpv6ErrorInvalid"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6NeedlessIpv6FragHdr"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6NeedlessIpv6FragHdr"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6RsvdSet"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6RsvdSet"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIPv6ExtHdrHopByHop"
-      oid  = "PAN-COMMON-MIB::panFlowDosIPv6ExtHdrHopByHop"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosip6IPv6ExtHdrRouting"
-      oid  = "PAN-COMMON-MIB::panFlowDosip6IPv6ExtHdrRouting"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosIp6IPv6ExtHdrDestOpt"
-      oid  = "PAN-COMMON-MIB::panFlowDosIp6IPv6ExtHdrDestOpt"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosCurrSessIncrFailed"
-      oid  = "PAN-COMMON-MIB::panFlowDosCurrSessIncrFailed"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosCurrSessDecrFailed"
-      oid  = "PAN-COMMON-MIB::panFlowDosCurrSessDecrFailed"
-
-    [[inputs.snmp.table.field]]
-      name = "panTcpAllocWqeFailed"
-      oid  = "PAN-COMMON-MIB::panTcpAllocWqeFailed"
-
-    [[inputs.snmp.table.field]]
-      name = "panTcpDeny"
-      oid  = "PAN-COMMON-MIB::panTcpDeny"
-
-    [[inputs.snmp.table.field]]
-      name = "panTcpDropOutOfWnd"
-      oid  = "PAN-COMMON-MIB::panTcpDropOutOfWnd"
-
-    [[inputs.snmp.table.field]]
-      name = "panTcpDropPacket"
-      oid  = "PAN-COMMON-MIB::panTcpDropPacket"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowActionClose"
-      oid  = "PAN-COMMON-MIB::panFlowActionClose"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowActionReset"
-      oid  = "PAN-COMMON-MIB::panFlowActionReset"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowTcpNonSyn"
-      oid  = "PAN-COMMON-MIB::panFlowTcpNonSyn"
-
-    [[inputs.snmp.table.field]]
-      name = "panTcpExceedSegLimit"
-      oid  = "PAN-COMMON-MIB::panTcpExceedSegLimit"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowDosPbpDrop"
-      oid  = "PAN-COMMON-MIB::panFlowDosPbpDrop"
-
-    [[inputs.snmp.table.field]]
-      name = "panPktAllocFailure"
-      oid  = "PAN-COMMON-MIB::panPktAllocFailure"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowFwdL3TtlZero"
-      oid  = "PAN-COMMON-MIB::panFlowFwdL3TtlZero"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowMeterHostThrottle"
-      oid  = "PAN-COMMON-MIB::panFlowMeterHostThrottle"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowHostServiceDeny"
-      oid  = "PAN-COMMON-MIB::panFlowHostServiceDeny"
-
-    [[inputs.snmp.table.field]]
-      name = "panFlowHostServiceUnknown"
-      oid  = "PAN-COMMON-MIB::panFlowHostServiceUnknown"
-
-    [[inputs.snmp.table.field]]
-      name = "panPktAllocFailureCos"
-      oid  = "PAN-COMMON-MIB::panPktAllocFailureCos"
-
-    [[inputs.snmp.table.field]]
-      name = "panSessionDiscard"
-      oid  = "PAN-COMMON-MIB::panSessionDiscard"
-
-  [[inputs.snmp.table]]
-    name         = "pan_zones"
-    inherit_tags = ["hostname"]
-    oid          = "PAN-COMMON-MIB::panZoneTable"
-    index_as_tag = true
-
-    [[inputs.snmp.table.field]]
-      oid    = "PAN-COMMON-MIB::panZoneName"
-      name   = "zone"
-      is_tag = true
-
-    [[inputs.snmp.table.field]]
-      oid  = "PAN-COMMON-MIB::panZoneActiveTcpCps"
-      name = "tcp_cps"
-
-    [[inputs.snmp.table.field]]
-      oid  = "PAN-COMMON-MIB::panZoneActiveUdpCps"
-      name = "udp_cps"
-
-    [[inputs.snmp.table.field]]
-      oid  = "PAN-COMMON-MIB::panZoneActiveOtherIpCps"
-      name = "other_ip_cps"
-
-  {{- if ($fw.chassis | default false) }}
+  {% endif %}
+  {% if fw.get('chassis') %}
 
   # Optional Palo Alto chassis profile.
   # Uses tables instead of fixed slot OIDs so multi-blade models can expose
@@ -924,11 +976,20 @@
       oid  = "ENTITY-MIB::entPhysicalIsFRU"
       name = "is_fru"
 
+  # entPhySensorTable and entStateTable are indexed by entPhysicalIndex, so
+  # the entPhysicalName column joins on the same row index and labels each
+  # sensor/state row with a readable "entity_name" tag. Entities without a
+  # sensor/state row only get tags and no fields, so Telegraf drops them.
   [[inputs.snmp.table]]
     name         = "pan_entity_sensors"
     inherit_tags = ["hostname"]
     oid          = "ENTITY-SENSOR-MIB::entPhySensorTable"
     index_as_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid    = "ENTITY-MIB::entPhysicalName"
+      name   = "entity_name"
+      is_tag = true
 
     [[inputs.snmp.table.field]]
       oid    = "ENTITY-SENSOR-MIB::entPhySensorValue"
@@ -957,6 +1018,11 @@
     index_as_tag = true
 
     [[inputs.snmp.table.field]]
+      oid    = "ENTITY-MIB::entPhysicalName"
+      name   = "entity_name"
+      is_tag = true
+
+    [[inputs.snmp.table.field]]
       oid  = "ENTITY-STATE-MIB::entStateAdmin"
       name = "admin_state"
 
@@ -975,19 +1041,10 @@
     [[inputs.snmp.table.field]]
       oid  = "ENTITY-STATE-MIB::entStateStandby"
       name = "standby_state"
-
-  {{- if $fw.pan_entity_ext }}
+    {% if fw.get('pan_entity_ext') %}
 
   # PAN-ENTITY-EXT-MIB is documented for PA-7000 Series and PA-5450.
   # It exposes power usage/capacity for FRU modules, fan trays, and PSUs.
-  [[inputs.snmp.field]]
-    oid  = "PAN-ENTITY-EXT-MIB::panEntityTotalPowerAvail.0"
-    name = "power_available_watts"
-
-  [[inputs.snmp.field]]
-    oid  = "PAN-ENTITY-EXT-MIB::panEntityTotalPowerUsed.0"
-    name = "power_used_watts"
-
   [[inputs.snmp.table]]
     name         = "pan_entity_fru_modules"
     inherit_tags = ["hostname"]
@@ -1021,10 +1078,8 @@
     [[inputs.snmp.table.field]]
       oid  = "PAN-ENTITY-EXT-MIB::panEntryPowerSupplyPowerCapacity"
       name = "power_capacity_watts"
+    {% endif %}
+  {% endif %}
 
-  {{- end }}
-
-  {{- end }}
-	  
-{{- end }}
-{{- end }}
+{% endif %}
+{% endfor %}
