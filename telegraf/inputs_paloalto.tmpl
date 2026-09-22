@@ -264,7 +264,7 @@
       oid  = "HOST-RESOURCES-MIB::hrStorageUsed"
       name = "storage_used"
 
-    {{- if or ($fw.panos_11_2_metrics | default false) ($fw.panos_12_metrics | default false) }}
+    {{- if ($fw.panos_11_2_metrics | default false) }}
     [[inputs.snmp.table.field]]
       oid  = "PAN-COMMON-MIB::panhrStorageUsage"
       name = "storage_usage_pct"
@@ -418,7 +418,7 @@
 
   {{- end }}
 
-  {{- if or ($fw.panos_11_2_metrics | default false) ($fw.panos_12_metrics | default false) }}
+  {{- if ($fw.panos_11_2_metrics | default false) }}
 
   # PAN-OS 11.2+ PA cluster summary/utilization objects.
   # Keep interface counters as the primary source for throughput.

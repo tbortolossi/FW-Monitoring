@@ -86,6 +86,27 @@ class GeneratorCoreTests(unittest.TestCase):
         self.assertEqual(palo["chassis_family"], "pa7500")
         self.assertNotIn("chassis", firewalls[1])
 
+    def test_inventory_enrichment_preserves_explicit_metric_overrides(self):
+        firewalls = [{
+            "hostname": "PA-440",
+            "vendor": "paloalto",
+            "panos_version": "12.2.3",
+            "panos_11_2_metrics": False,
+            "interface_utilization": False,
+        }]
+        generate.enrich_inventory(firewalls)
+        palo = firewalls[0]
+        self.assertFalse(palo["panos_11_2_metrics"])
+        self.assertFalse(palo["interface_utilization"])
+        self.assertTrue(palo["panos_12_metrics"])
+        self.assertTrue(palo["vsys_total_cps"])
+
+        rendered = generate.render_template("inputs_paloalto.tmpl", {"firewalls": firewalls})
+        self.assertNotIn('name         = "pan_pa_cluster"', rendered)
+        self.assertNotIn('name         = "pan_interface_utilization"', rendered)
+        self.assertNotIn('name = "storage_usage_pct"', rendered)
+        self.assertIn('name = "total_cps"', rendered)
+
     def test_snmp_arguments_cover_v2_v3_security_levels(self):
         self.assertEqual(
             generate.build_snmp_args({"snmp_version": 2, "community": "community"}),

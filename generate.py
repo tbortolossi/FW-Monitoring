@@ -393,10 +393,10 @@ def enrich_inventory(firewalls):
 
         panos_version = firewall.get("panos_version")
         if panos_version:
-            firewall["panos_11_2_metrics"] = pan_at_least(panos_version, 11, 2)
-            firewall["panos_12_metrics"] = pan_at_least(panos_version, 12, 1)
-            firewall["vsys_total_cps"] = pan_at_least(panos_version, 12, 1)
-            firewall["interface_utilization"] = pan_at_least(panos_version, 12, 1)
+            firewall.setdefault("panos_11_2_metrics", pan_at_least(panos_version, 11, 2))
+            firewall.setdefault("panos_12_metrics", pan_at_least(panos_version, 12, 1))
+            firewall.setdefault("vsys_total_cps", pan_at_least(panos_version, 12, 1))
+            firewall.setdefault("interface_utilization", pan_at_least(panos_version, 12, 1))
 
         model = firewall.get("model") or firewall.get("chassis_model") or firewall.get("hostname")
         if "chassis" not in firewall:

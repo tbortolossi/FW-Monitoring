@@ -16,6 +16,7 @@
 
 - API environmental sensor values now always use floating-point fields, preventing InfluxDB integer/float type conflicts when PAN-OS changes numeric formatting between polls.
 - Palo Alto SNMP HA history now keeps standalone devices as a valid time series instead of producing an empty Grafana timeline error.
+- Explicit Palo Alto metric-table overrides are preserved during version enrichment, allowing problematic optional walks to be disabled without losing PAN-OS capability detection.
 
 ### Security
 
