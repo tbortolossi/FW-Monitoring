@@ -131,6 +131,13 @@ def row(panel_id: int, title: str, y: int, panels: list[dict], *, repeat: str | 
     return result
 
 
+def repeated_panel(panel: dict, variable_name: str, *, max_per_row: int) -> dict:
+    panel["repeat"] = variable_name
+    panel["repeatDirection"] = "h"
+    panel["maxPerRow"] = max_per_row
+    return panel
+
+
 def variable(name: str, label: str, query: str, *, hidden: bool = False, multi: bool = False, include_all: bool = False) -> dict:
     item = {
         "current": {},
@@ -214,7 +221,7 @@ from(bucket: "firewalls")
         timeseries(7, "Throughput Global Interfaces", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and exists r.interface and r.interface !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.interface !~ /\\./ and r._field =~ /^(in|out)_octets$/)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field =~ /^(in|out)_octets$/)
   |> derivative(unit: 1s, nonNegative: true)
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: if r._field == "in_octets" then "In" else "Out" }))
@@ -237,16 +244,18 @@ from(bucket: "firewalls")
 ''', 32),
         ]),
         row(9001, "Interfaces", 32, [
-            timeseries(8, "Throughput by Interface", '''
+            repeated_panel(timeseries(8, "Throughput ${interface}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r.interface =~ /^${interface:regex}$/ and r._field =~ /^(in|out)_octets$/)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r.interface == "${interface}" and r._field =~ /^(in|out)_octets$/)
   |> derivative(unit: 1s, nonNegative: true)
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: r.interface + (if r._field == "in_octets" then " In" else " Out") }))
+  |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: if r._field == "in_octets" then "In" else "Out" }))
   |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 33, 12, 10, "bps"),
+''', 0, 33, 12, 7, "bps", "Repeated automatically for every active physical Ethernet interface returned by the XML API."), "interface", max_per_row=2),
+        ]),
+        row(9008, "API Interface Details", 33, [
             timeseries(9, "Packets per Second by Interface", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -256,7 +265,7 @@ from(bucket: "firewalls")
   |> map(fn: (r) => ({ r with _field: r.interface + (if r._field == "in_packets" then " In" else " Out") }))
   |> group(columns: ["_field"])
   |> keep(columns: ["_time", "_field", "_value"])
-''', 12, 33, 12, 10, "pps"),
+''', 0, 34, 12, 10, "pps"),
             table(10, "Interface Status", '''
 from(bucket: "firewalls")
   |> range(start: -24h)
@@ -268,21 +277,21 @@ from(bucket: "firewalls")
   |> pivot(rowKey: ["interface"], columnKey: ["_field"], valueColumn: "_value")
   |> keep(columns: ["interface", "state", "speed_mbps", "duplex", "mode", "zone", "vsys", "forwarding"])
   |> sort(columns: ["interface"])
-''', 0, 43, 24, 10, "Operational state, negotiated speed, duplex, mode, zone, VSYS and forwarding instance from show interface all."),
+''', 12, 34, 12, 10, "Operational state, negotiated speed, duplex, mode, zone, VSYS and forwarding instance from show interface all."),
         ]),
-        row(9004, "Interface Errors / Discards", 33, [
-            timeseries(11, "Errors / Discards by Interface", '''
+        row(9004, "Interface Errors / Discards", 34, [
+            repeated_panel(timeseries(11, "Errors / Discards ${interface}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r.interface =~ /^${interface:regex}$/ and r._field =~ /^(in_errors|in_discards)$/)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r.interface == "${interface}" and r._field =~ /^(in_errors|in_discards)$/)
   |> derivative(unit: 1s, nonNegative: true)
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> map(fn: (r) => ({ r with _field: r.interface + (if r._field == "in_errors" then " Errors" else " Discards") }))
+  |> map(fn: (r) => ({ r with _field: if r._field == "in_errors" then "In Errors" else "In Discards" }))
   |> group(columns: ["_field"])
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 34, 24, 10, "ops"),
+''', 0, 35, 24, 10, "ops", "PAN-OS hardware counters expose ingress errors and discards on this API path."), "interface", max_per_row=1),
         ]),
-        row(9002, "Dataplane ${dataplane}", 34, [
+        row(9002, "Dataplane ${dataplane}", 35, [
             timeseries(12, "CPU per Core - ${dataplane}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -302,7 +311,7 @@ from(bucket: "firewalls")
   |> keep(columns: ["_time", "_field", "_value"])
 ''', 12, 35, 12, 10, "percent", "Session, packet-buffer, packet-descriptor and software-tag pressure reported by resource-monitor."),
         ], repeat="dataplane"),
-        row(9007, "API Session Details", 35, [
+        row(9007, "API Session Details", 36, [
             timeseries(14, "Sessions by Protocol", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -319,7 +328,7 @@ from(bucket: "firewalls")
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
 ''', 12, 36, 12, 9, "pps"),
         ]),
-        row(9003, "Data Plane Pressure and Key Drops", 36, [
+        row(9003, "Data Plane Pressure and Key Drops", 37, [
             timeseries(16, "Selected Drop / Failure Counters", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -331,7 +340,7 @@ from(bucket: "firewalls")
   |> keep(columns: ["_time", "_field", "_value"])
 ''', 0, 37, 24, 12, "ops", "PAN-OS severity=drop filter; use the Category and Aspect selectors above. Cardinality is bounded by counter_limit."),
         ]),
-        row(9005, "Advanced Resource Troubleshooting - Management Plane", 37, [
+        row(9005, "Advanced Resource Troubleshooting - Management Plane", 38, [
             timeseries(17, "Management Plane Load Average", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -373,7 +382,7 @@ from(bucket: "firewalls")
   |> keep(columns: ["_time", "_field", "_value"])
 ''', 12, 58, 12, 9, "percent", "Aggregated by process name to avoid PID cardinality."),
         ]),
-        row(9100, "Chassis and Environmental Sensors", 38, [
+        row(9100, "Chassis and Environmental Sensors", 39, [
             timeseries(20, "Environmental Sensor Values", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -417,8 +426,11 @@ from(bucket: "firewalls")
 '''
     interface_query = '''
 from(bucket: "firewalls")
-  |> range(start: -7d)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r._field == "in_octets")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r._field == "state" and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./)
+  |> group(columns: ["interface"])
+  |> last()
+  |> filter(fn: (r) => r._value == "up")
   |> map(fn: (r) => ({ _value: r.interface }))
   |> group()
   |> distinct(column: "_value")
@@ -469,7 +481,7 @@ schema.tagValues(bucket: "firewalls", tag: "aspect", predicate: (r) => r._measur
         "timezone": "browser",
         "title": "Palo Alto API Performance Monitoring",
         "uid": "paloalto-api-performance",
-        "version": 2,
+        "version": 3,
         "weekStart": "",
     }
 

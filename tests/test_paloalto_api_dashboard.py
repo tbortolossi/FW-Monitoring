@@ -31,6 +31,7 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
         }
         expected = {
             "Interfaces",
+            "API Interface Details",
             "Interface Errors / Discards",
             "Dataplane ${dataplane}",
             "API Session Details",
@@ -41,6 +42,35 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
         self.assertTrue(expected.issubset(rows))
         self.assertTrue(all(rows[title]["collapsed"] for title in expected))
         self.assertEqual(rows["Dataplane ${dataplane}"]["repeat"], "dataplane")
+
+    def test_active_physical_interfaces_get_repeated_api_panels(self):
+        rows = {
+            panel["title"]: panel
+            for panel in self.dashboard["panels"]
+            if panel.get("type") == "row"
+        }
+        throughput = rows["Interfaces"]["panels"][0]
+        self.assertEqual(throughput["title"], "Throughput ${interface}")
+        self.assertEqual(throughput["repeat"], "interface")
+        self.assertEqual(throughput["maxPerRow"], 2)
+        self.assertIn('r.interface == "${interface}"', throughput["targets"][0]["query"])
+        self.assertIn("paloalto_api_interfaces", throughput["targets"][0]["query"])
+
+        errors = rows["Interface Errors / Discards"]["panels"][0]
+        self.assertEqual(errors["title"], "Errors / Discards ${interface}")
+        self.assertEqual(errors["repeat"], "interface")
+        self.assertIn("in_errors|in_discards", errors["targets"][0]["query"])
+
+        interface = next(item for item in self.dashboard["templating"]["list"] if item["name"] == "interface")
+        self.assertTrue(interface["includeAll"])
+        self.assertIn('r._field == "state"', interface["query"])
+        self.assertIn('r._value == "up"', interface["query"])
+        self.assertIn("^ethernet", interface["query"])
+        self.assertIn("r.interface !~ /\\./", interface["query"])
+
+        global_throughput = next(panel for panel in self.dashboard["panels"] if panel.get("title") == "Throughput Global Interfaces")
+        self.assertIn("^ethernet", global_throughput["targets"][0]["query"])
+        self.assertIn("r.interface !~ /\\./", global_throughput["targets"][0]["query"])
 
     def test_dashboard_is_api_only(self):
         serialized = json.dumps(self.dashboard)
