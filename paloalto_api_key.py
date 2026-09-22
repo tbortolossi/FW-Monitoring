@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import getpass
 import re
 import shutil
@@ -15,6 +16,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import yaml
+
+
+PALO_ALTO_VENDORS = {"paloalto", "palo", "panos", "palo_alto"}
 
 
 def generate_key(host: str, username: str, password: str, port: int, verify_tls: bool, timeout: int) -> str:
@@ -49,13 +53,82 @@ def validate_target(host: str, port: int) -> None:
 def find_inventory_entry(data, host: str, hostname: str | None):
     if not isinstance(data, list):
         raise ValueError("firewalls.yml must contain a list")
-    matches = [item for item in data if isinstance(item, dict) and (item.get("host") == host or (hostname and item.get("hostname") == hostname))]
+    if hostname:
+        matches = [
+            item for item in data
+            if isinstance(item, dict) and item.get("hostname") == hostname
+        ]
+    else:
+        matches = [
+            item for item in data
+            if isinstance(item, dict) and item.get("host") == host
+        ]
     if len(matches) != 1:
         raise ValueError("exactly one Palo Alto inventory entry must match the host or hostname")
     firewall = matches[0]
-    if str(firewall.get("vendor", "paloalto")).lower() not in {"paloalto", "palo", "panos", "palo_alto"}:
+    if str(firewall.get("vendor", "paloalto")).lower() not in PALO_ALTO_VENDORS:
         raise ValueError("the matching inventory entry is not a Palo Alto firewall")
     return firewall
+
+
+def paloalto_inventory_entries(data) -> list[dict]:
+    if not isinstance(data, list):
+        raise ValueError("firewalls.yml must contain a list")
+    entries = [
+        item for item in data
+        if isinstance(item, dict)
+        and str(item.get("vendor", "paloalto")).lower() in PALO_ALTO_VENDORS
+    ]
+    if not entries:
+        raise ValueError("firewalls.yml does not contain a Palo Alto firewall")
+    for firewall in entries:
+        if not firewall.get("hostname") or not firewall.get("host"):
+            raise ValueError("each Palo Alto firewall must define hostname and host")
+    return entries
+
+
+def effective_api_host(firewall: dict) -> str:
+    api_config = firewall.get("api_monitoring")
+    if isinstance(api_config, dict) and api_config.get("host"):
+        return str(api_config["host"])
+    return str(firewall["host"])
+
+
+def select_inventory_entry(data, *, input_fn=None, output_fn=None) -> dict:
+    input_fn = input_fn or input
+    output_fn = output_fn or print
+    entries = paloalto_inventory_entries(data)
+    output_fn("Palo Alto firewalls declared in the inventory:")
+    for index, firewall in enumerate(entries, start=1):
+        api_config = firewall.get("api_monitoring")
+        enabled = isinstance(api_config, dict) and api_config.get("enabled") is True
+        api_host = effective_api_host(firewall)
+        suffix = "API enabled" if enabled else "API disabled"
+        output_fn(f"  {index}. {firewall['hostname']} ({api_host}) [{suffix}]")
+    while True:
+        choice = input_fn(f"Select a firewall [1-{len(entries)}]: ").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(entries):
+            return entries[int(choice) - 1]
+        output_fn("Invalid selection. Enter one of the displayed numbers.")
+
+
+def resolve_inventory_target(
+    data,
+    host: str | None,
+    hostname: str | None,
+    *,
+    input_fn=None,
+    output_fn=None,
+) -> tuple[dict, str, str]:
+    if host:
+        firewall = find_inventory_entry(data, host, hostname)
+    elif hostname:
+        firewall = find_inventory_entry(data, "", hostname)
+    else:
+        firewall = select_inventory_entry(data, input_fn=input_fn, output_fn=output_fn)
+    selected_hostname = str(firewall["hostname"])
+    selected_host = host or effective_api_host(firewall)
+    return firewall, selected_host, selected_hostname
 
 
 def update_env(path: Path, name: str, value: str) -> None:
@@ -92,13 +165,15 @@ def update_inventory(
     if not backup.exists():
         shutil.copy2(path, backup)
         backup.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    api_config = {
-        "enabled": True,
-        "port": port,
-        "verify_tls": verify_tls,
-    }
+    existing = firewall.get("api_monitoring")
+    api_config = copy.deepcopy(existing) if isinstance(existing, dict) else {}
+    api_config.update(enabled=True, port=port, verify_tls=verify_tls)
+    api_config.pop("api_key", None)
+    api_config.pop("api_key_env", None)
     if str(firewall.get("host")) != host:
         api_config["host"] = host
+    else:
+        api_config.pop("host", None)
     if api_key:
         api_config["api_key"] = api_key
     else:
@@ -111,9 +186,15 @@ def update_inventory(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", help="PAN-OS API IP or hostname; may differ from the inventory SNMP host")
-    parser.add_argument("--hostname", help="inventory hostname; defaults to the host value")
-    parser.add_argument("--username")
+    parser.add_argument(
+        "--host",
+        help="PAN-OS API IP or DNS name; overrides the address declared for the selected firewall",
+    )
+    parser.add_argument(
+        "--hostname",
+        help="select an inventory firewall non-interactively instead of showing the menu",
+    )
+    parser.add_argument("--username", help="PAN-OS API username; prompted when omitted")
     parser.add_argument("--port", type=int, default=443)
     parser.add_argument("--timeout", type=int, default=15)
     parser.add_argument("--inventory", type=Path, default=Path("firewalls.yml"))
@@ -127,18 +208,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--insecure", action="store_true", help="disable TLS certificate verification")
     args = parser.parse_args(argv)
 
-    host = args.host or input("Firewall IP or hostname: ").strip()
-    username = args.username or input("API username: ").strip()
-    password = getpass.getpass("API password: ")
-    if not host or not username or not password:
-        parser.error("host, username and password are required")
     try:
-        validate_target(host, args.port)
         inventory = yaml.safe_load(args.inventory.read_text(encoding="utf-8")) or []
-        find_inventory_entry(inventory, host, args.hostname)
+        _, host, hostname = resolve_inventory_target(
+            inventory,
+            args.host,
+            args.hostname,
+        )
+        validate_target(host, args.port)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         parser.error(str(exc))
-    env_name = environment_name(args.hostname or host)
+    username = args.username or input("API username: ").strip()
+    password = getpass.getpass("API password: ")
+    if not username or not password:
+        parser.error("username and password are required")
+    env_name = environment_name(hostname)
     try:
         key = generate_key(host, username, password, args.port, not args.insecure, args.timeout)
     except Exception as exc:
@@ -148,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
         backup = update_inventory(
             args.inventory,
             host,
-            args.hostname,
+            hostname,
             not args.insecure,
             args.port,
             api_key_env=env_name,
@@ -158,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         backup = update_inventory(
             args.inventory,
             host,
-            args.hostname,
+            hostname,
             not args.insecure,
             args.port,
             api_key=key,

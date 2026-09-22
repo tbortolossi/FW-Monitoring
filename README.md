@@ -316,23 +316,40 @@ By default, API polling uses the firewall-level `host`, which is also used for S
 
 ### Generate and Store a Key
 
-The helper obtains an API key using an interactive password prompt. By default it stores the secret in `.env`, writes an `${ENVIRONMENT_VARIABLE}` reference in the matching inventory entry, and sets both files to mode `0600`. `--host` is the API address; `--hostname` lets the helper find the inventory entry when its SNMP address is different:
+The helper parses `firewalls.yml` and lists only the declared Palo Alto firewalls. Select one by number, enter the API username and password, and the helper uses the declared `host` automatically (or the existing `api_monitoring.host` override). By default it stores the generated secret in `.env`, writes an `${ENVIRONMENT_VARIABLE}` reference in the selected YAML entry, and sets both files to mode `0600`:
 
 ```bash
-.venv/bin/python paloalto_api_key.py --host 192.0.2.101 --hostname PA-440 --username fwmon-api
+.venv/bin/python paloalto_api_key.py
+```
+
+Example interaction:
+
+```text
+Palo Alto firewalls declared in the inventory:
+  1. PARIS-PA-01 (192.0.2.101) [API disabled]
+  2. LYON-PA-01 (192.0.2.102) [API enabled]
+Select a firewall [1-2]: 1
+API username: fwmon-api
+API password:
+```
+
+For scripts and unattended workflows, bypass the menu with `--hostname`; the helper resolves the declared API address automatically. `--host` remains available to supply or replace a distinct API address:
+
+```bash
+.venv/bin/python paloalto_api_key.py --hostname PA-440 --username fwmon-api
+.venv/bin/python paloalto_api_key.py --hostname PA-440 --host api-pa.example.test --username fwmon-api
 ```
 
 Direct YAML storage remains available for backward compatibility when explicitly requested:
 
 ```bash
 .venv/bin/python paloalto_api_key.py \
-  --host 192.0.2.101 \
   --hostname PA-440 \
   --username fwmon-api \
   --storage yaml
 ```
 
-The password and generated key are never printed. Before its first rewrite, the helper preserves the original inventory as `firewalls.yml.bak`; later runs do not overwrite that initial backup.
+The password and generated key are never printed. Existing polling settings in `api_monitoring` are preserved when a key is rotated or its storage mode changes. Before its first rewrite, the helper preserves the original inventory as `firewalls.yml.bak`; later runs do not overwrite that initial backup.
 
 `verify_tls: true` is the secure default. Install a trusted firewall certificate or the issuing internal CA on the Docker host/container. For a temporary lab with a self-signed certificate, pass `--insecure`; the helper then writes `verify_tls: false` explicitly.
 
