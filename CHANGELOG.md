@@ -9,6 +9,10 @@
 - The repeated per-interface **Throughput** and **Errors / Discards** panels of the API dashboards now include subinterfaces, tunnels, VLAN, loopback and aggregate interfaces from the logical `ifnet` counters, matching the SNMP dashboard; physical ports keep the hardware counters.
 - **Scan / Packet-Based Drops** panel (scan, packet-based attack, IPv6 and DoS session-accounting counters) in the API "Data Plane Pressure and Key Drops" section, equivalent to the SNMP panel.
 
+### Changed
+
+- `README.md` explains how to write `firewalls.yml` step by step (minimal SNMPv2c/SNMPv3 entries, `${VARIABLE}` secrets, `api_monitoring` block) and documents how `paloalto_api_key.py` works: menu, key generation, what it writes into `firewalls.yml`, the `--storage env` (default, key in `.env`) versus `--storage yaml` (key in the inventory) choice, and every command-line option.
+
 ### Fixed
 
 - VSYS slots that `show session meter` lists but that are not configured on the firewall (PAN-OS answers "You must specify a valid vsys") are no longer written to `paloalto_api_vsys`; they are probed again every `system_interval` (default one hour). Existing stale points can be removed with an InfluxDB delete on `_measurement="paloalto_api_vsys" AND vsys="<name>"`.
