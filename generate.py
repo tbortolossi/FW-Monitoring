@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import datetime as _datetime
+import copy
 import glob
 import hashlib
 import json
@@ -138,7 +139,34 @@ def prepare_runtime_dirs():
     MIB_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_inventory(path):
+ENV_REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+SECRET_KEYS = {"community", "auth_password", "priv_password", "api_key"}
+
+
+def resolve_environment_references(value, environment, location="firewalls.yml"):
+    if isinstance(value, dict):
+        return {
+            key: resolve_environment_references(item, environment, f"{location}.{key}")
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            resolve_environment_references(item, environment, f"{location}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    if not isinstance(value, str):
+        return value
+    match = ENV_REFERENCE.fullmatch(value.strip())
+    if not match:
+        return value
+    name = match.group(1)
+    resolved = environment.get(name)
+    if resolved is None or resolved == "":
+        raise SystemExit(f"ERROR: {location}: environment variable {name} is not set or is empty.")
+    return resolved
+
+
+def load_inventory(path, env_path=None):
     with Path(path).open("r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or []
     if not isinstance(data, list):
@@ -146,12 +174,26 @@ def load_inventory(path):
     for index, firewall in enumerate(data):
         if not isinstance(firewall, dict):
             raise SystemExit(f"ERROR: firewalls.yml entry #{index + 1} must be a mapping.")
-    return data
+    environment = {}
+    source = Path(env_path or PROJECT_DIR / ".env")
+    if source.is_file():
+        environment.update(load_dotenv(source))
+    environment.update(os.environ)
+    return resolve_environment_references(data, environment)
 
 
 def save_inventory(firewalls, path):
+    sanitized = copy.deepcopy(firewalls)
+    for firewall in sanitized:
+        for key in SECRET_KEYS:
+            if firewall.get(key):
+                firewall[key] = "<redacted>"
+        api_config = firewall.get("api_monitoring")
+        if isinstance(api_config, dict) and api_config.get("api_key"):
+            api_config["api_key"] = "<redacted>"
     with Path(path).open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(firewalls, handle, sort_keys=False, default_flow_style=False)
+        yaml.safe_dump(sanitized, handle, sort_keys=False, default_flow_style=False)
+    Path(path).chmod(0o600)
 
 
 def normalize_vendor(value):
@@ -264,6 +306,7 @@ def validate_api_monitoring(firewall, label):
         ("interval", 20, 10, 3600),
         ("resource_interval", 60, 10, 3600),
         ("counter_interval", 60, 10, 3600),
+        ("counter_limit", 256, 16, 2048),
         ("system_interval", 3600, 60, 86400),
     ):
         try:
@@ -673,6 +716,8 @@ def render_telegraf(firewalls, vendors):
         parts.append(render_template("inputs_paloalto_api.tmpl", context))
 
     conf_out.write_text("\n".join(parts), encoding="utf-8")
+    # The official image drops privileges before reading this bind mount.
+    conf_out.chmod(0o644)
     print("telegraf/telegraf.conf ready")
 
 
@@ -693,6 +738,7 @@ def render_paloalto_api_inventory(firewalls):
                 "interval": config["interval"],
                 "resource_interval": config["resource_interval"],
                 "counter_interval": config["counter_interval"],
+                "counter_limit": config["counter_limit"],
                 "system_interval": config["system_interval"],
             }
         )

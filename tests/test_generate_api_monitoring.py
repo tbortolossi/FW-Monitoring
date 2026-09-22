@@ -22,11 +22,53 @@ def inventory(api_monitoring):
 
 
 class GeneratorApiValidationTests(unittest.TestCase):
+    def test_yaml_environment_references_are_resolved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            inventory_path = directory / "firewalls.yml"
+            env_path = directory / ".env"
+            inventory_path.write_text(
+                "- hostname: PA-440\n"
+                "  host: 192.0.2.10\n"
+                "  community: ${PA_COMMUNITY}\n"
+                "  api_monitoring:\n"
+                "    enabled: true\n"
+                "    api_key: ${PA_API_KEY}\n",
+                encoding="utf-8",
+            )
+            env_path.write_text(
+                "PA_COMMUNITY=snmp-secret\nPA_API_KEY=api-secret\n",
+                encoding="utf-8",
+            )
+            firewalls = generate.load_inventory(inventory_path, env_path)
+        self.assertEqual(firewalls[0]["community"], "snmp-secret")
+        self.assertEqual(firewalls[0]["api_monitoring"]["api_key"], "api-secret")
+
+    def test_missing_yaml_environment_reference_fails_without_leaking_value(self):
+        with self.assertRaisesRegex(SystemExit, "environment variable MISSING_SECRET"):
+            generate.resolve_environment_references(
+                {"api_key": "${MISSING_SECRET}"},
+                {},
+            )
+
+    def test_generated_inventory_redacts_credentials(self):
+        firewalls = inventory({"enabled": True, "api_key": "api-secret"})
+        firewalls[0]["community"] = "snmp-secret"
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / ".firewalls.generated.yml"
+            generate.save_inventory(firewalls, destination)
+            generated = destination.read_text(encoding="utf-8")
+            mode = stat.S_IMODE(destination.stat().st_mode)
+        self.assertNotIn("api-secret", generated)
+        self.assertNotIn("snmp-secret", generated)
+        self.assertEqual(mode, 0o600)
+
     def test_api_defaults_are_normalized(self):
         firewalls = inventory({"enabled": True, "api_key_env": "PALOALTO_API_KEY_PA_440"})
         generate.validate_inventory(firewalls)
         api = firewalls[0]["api_monitoring"]
         self.assertEqual(api["interval"], 20)
+        self.assertEqual(api["counter_limit"], 256)
         self.assertEqual(api["resource_interval"], 60)
         self.assertTrue(api["verify_tls"])
         self.assertEqual(api["host"], "192.0.2.10")

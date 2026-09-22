@@ -16,11 +16,12 @@ The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB 
 - Telegraf SNMP polling generated from `firewalls.yml`
 - Optional Palo Alto XML API polling for sessions, management-plane resources, per-core/dataplane CPU, interface state and throughput, HA, storage, environmental sensors, and selected drop counters
 - Grafana with provisioned InfluxDB datasource
-- Four monitoring dashboards:
+- Five monitoring dashboards:
   - `Palo Alto Firewall Monitoring`
   - `Palo Alto Chassis Monitoring`
   - `Fortinet Firewall Monitoring`
   - `Palo Alto API Performance Monitoring`
+  - `Palo Alto API Chassis Monitoring`
 - Best-effort SNMP discovery before Telegraf config generation
 
 ## Common Tasks
@@ -120,6 +121,7 @@ In Grafana:
 1. Open **Dashboards**.
 2. Select the required dashboard:
    - **Palo Alto API Performance Monitoring** for the API-only Palo Alto view.
+   - **Palo Alto API Chassis Monitoring** for API-only high-end and modular platform details.
    - **Palo Alto Firewall Monitoring** for the standard Palo Alto SNMP view.
    - **Palo Alto Chassis Monitoring** for chassis-specific SNMP metrics.
    - **Fortinet Firewall Monitoring** for Fortinet devices.
@@ -178,6 +180,33 @@ You can also run the Python script directly after the virtual environment exists
 
 `firewalls.yml` is ignored by Git because it usually contains real firewall IPs and SNMP credentials. Commit changes to `firewalls_example.yml` when you want to improve the sample inventory.
 
+### Reference Secrets from `.env`
+
+The recommended configuration keeps secrets out of YAML. Put each secret in the local `.env` file, then use an exact `${VARIABLE_NAME}` reference as the YAML value. The generator resolves these references before validation; the process environment takes precedence over `.env` when both define the same name.
+
+```dotenv
+PA_PARIS_SNMP_AUTH=CHANGE_ME_AUTH_PASSWORD
+PA_PARIS_SNMP_PRIV=CHANGE_ME_PRIV_PASSWORD
+PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
+```
+
+```yaml
+- hostname: PA-440
+  host: 192.0.2.101
+  vendor: paloalto
+  snmp_version: 3
+  username: fwmon
+  auth_protocol: sha256
+  auth_password: ${PA_PARIS_SNMP_AUTH}
+  priv_protocol: aes256
+  priv_password: ${PA_PARIS_SNMP_PRIV}
+  api_monitoring:
+    enabled: true
+    api_key: ${PALOALTO_API_KEY_PA_440}
+```
+
+The reference must occupy the complete YAML scalar; embedded forms such as `prefix-${NAME}` are not expanded. Generation stops with the missing variable name—but never its value—when a reference cannot be resolved. Keep `.env` private (`chmod 600 .env`) and do not commit it. Direct values remain supported for backward compatibility, but environment references reduce secret duplication and are recommended for new installations.
+
 Minimal Palo Alto SNMPv3:
 
 ```yaml
@@ -187,14 +216,14 @@ Minimal Palo Alto SNMPv3:
   snmp_version: 3
   username: fwmon
   auth_protocol: sha256
-  auth_password: CHANGE_ME_AUTH_PASSWORD
+  auth_password: ${PA_440_SNMP_AUTH}
   priv_protocol: aes256
-  priv_password: CHANGE_ME_PRIV_PASSWORD
+  priv_password: ${PA_440_SNMP_PRIV}
   api_monitoring:
     enabled: true
     # Optional: set this only when API and SNMP use different addresses.
     # host: 192.0.2.201
-    api_key: CHANGE_ME_PALO_ALTO_API_KEY
+    api_key: ${PALOALTO_API_KEY_PA_440}
     verify_tls: true
     interval: 20
     resource_interval: 60
@@ -210,9 +239,9 @@ Minimal Fortinet SNMPv3:
   snmp_version: 3
   username: fwmon
   auth_protocol: sha256
-  auth_password: CHANGE_ME_AUTH_PASSWORD
+  auth_password: ${FGT_80F_SNMP_AUTH}
   priv_protocol: aes256
-  priv_password: CHANGE_ME_PRIV_PASSWORD
+  priv_password: ${FGT_80F_SNMP_PRIV}
 ```
 
 SNMPv2c is also supported:
@@ -222,7 +251,7 @@ SNMPv2c is also supported:
   host: 192.0.2.101
   vendor: paloalto
   snmp_version: 2
-  community: CHANGE_ME_COMMUNITY
+  community: ${PA_440_SNMP_COMMUNITY}
 ```
 
 ## Palo Alto XML API Setup
@@ -233,7 +262,11 @@ Create a dedicated PAN-OS administrator with a custom role that grants only XML 
 
 ### Choose Where to Store the API Key
 
-The simplest option matches the existing SNMPv2c/SNMPv3 inventory: store the API key directly in the local `firewalls.yml`. That file is ignored by Git and already contains firewall credentials:
+The recommended option stores the API key in `.env` and leaves only a variable reference in `firewalls.yml`:
+
+```dotenv
+PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
+```
 
 ```yaml
 - hostname: PA-440
@@ -242,12 +275,12 @@ The simplest option matches the existing SNMPv2c/SNMPv3 inventory: store the API
   snmp_version: 3
   username: fwmon
   auth_protocol: sha256
-  auth_password: CHANGE_ME_AUTH_PASSWORD
+  auth_password: ${PA_440_SNMP_AUTH}
   priv_protocol: aes256
-  priv_password: CHANGE_ME_PRIV_PASSWORD
+  priv_password: ${PA_440_SNMP_PRIV}
   api_monitoring:
     enabled: true
-    api_key: CHANGE_ME_PALO_ALTO_API_KEY
+    api_key: ${PALOALTO_API_KEY_PA_440}
     port: 443
     verify_tls: true
     interval: 20
@@ -256,15 +289,7 @@ The simplest option matches the existing SNMPv2c/SNMPv3 inventory: store the API
     system_interval: 3600
 ```
 
-Never put a real key in `firewalls_example.yml`, a commit, a ticket, or a shared log.
-
-If local policy requires secrets to be separate from inventory, put the key in `.env`:
-
-```dotenv
-PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
-```
-
-Then reference its variable name in `firewalls.yml` instead of using `api_key`:
+Never put a real key in `firewalls_example.yml`, a commit, a ticket, or a shared log. The earlier `api_key_env` syntax remains supported for existing installations:
 
 ```yaml
   api_monitoring:
@@ -282,38 +307,55 @@ By default, API polling uses the firewall-level `host`, which is also used for S
   host: 192.0.2.101       # SNMP address
   vendor: paloalto
   snmp_version: 2
-  community: CHANGE_ME_COMMUNITY
+  community: ${PA_440_SNMP_COMMUNITY}
   api_monitoring:
     enabled: true
     host: 192.0.2.201     # PAN-OS XML API address
-    api_key: CHANGE_ME_PALO_ALTO_API_KEY
+    api_key: ${PALOALTO_API_KEY_PA_440}
 ```
 
 ### Generate and Store a Key
 
-The helper obtains an API key using an interactive password prompt and updates the matching inventory entry. By default it stores the key directly in the ignored local `firewalls.yml`, matching the SNMP credential workflow. `--host` is the API address; `--hostname` lets the helper find the inventory entry when its SNMP address is different:
+The helper parses `firewalls.yml` and lists only the declared Palo Alto firewalls. Select one by number, enter the API username and password, and the helper uses the declared `host` automatically (or the existing `api_monitoring.host` override). By default it stores the generated secret in `.env`, writes an `${ENVIRONMENT_VARIABLE}` reference in the selected YAML entry, and sets both files to mode `0600`:
 
 ```bash
-.venv/bin/python paloalto_api_key.py --host 192.0.2.101 --hostname PA-440 --username fwmon-api
+.venv/bin/python paloalto_api_key.py
 ```
 
-Use environment-variable storage instead when required:
+Example interaction:
+
+```text
+Palo Alto firewalls declared in the inventory:
+  1. PARIS-PA-01 (192.0.2.101) [API disabled]
+  2. LYON-PA-01 (192.0.2.102) [API enabled]
+Select a firewall [1-2]: 1
+API username: fwmon-api
+API password:
+```
+
+For scripts and unattended workflows, bypass the menu with `--hostname`; the helper resolves the declared API address automatically. `--host` remains available to supply or replace a distinct API address:
+
+```bash
+.venv/bin/python paloalto_api_key.py --hostname PA-440 --username fwmon-api
+.venv/bin/python paloalto_api_key.py --hostname PA-440 --host api-pa.example.test --username fwmon-api
+```
+
+Direct YAML storage remains available for backward compatibility when explicitly requested:
 
 ```bash
 .venv/bin/python paloalto_api_key.py \
-  --host 192.0.2.101 \
   --hostname PA-440 \
   --username fwmon-api \
-  --storage env
+  --storage yaml
 ```
 
-The password and generated key are never printed. The helper sets the updated inventory and its backup to mode `0600`. Before its first rewrite, it preserves the original inventory as `firewalls.yml.bak`; later runs do not overwrite that initial backup.
+The password and generated key are never printed. Existing polling settings in `api_monitoring` are preserved when a key is rotated or its storage mode changes. Before its first rewrite, the helper preserves the original inventory as `firewalls.yml.bak`; later runs do not overwrite that initial backup.
 
 `verify_tls: true` is the secure default. Install a trusted firewall certificate or the issuing internal CA on the Docker host/container. For a temporary lab with a self-signed certificate, pass `--insecure`; the helper then writes `verify_tls: false` explicitly.
 
 ### Docker and Non-Docker Variable Handling
 
-With the normal Docker Compose workflow, no manual `export` or `docker -e` command is required. `generate.py` resolves both direct `api_key` values and `.env` references, writes only the required keys to the mode-`0600` generated file `telegraf/paloalto-api.env`, and Docker Compose injects that file into Telegraf. Other `.env` secrets, such as Grafana and InfluxDB administrator passwords, are not passed to the Telegraf container.
+With the normal Docker Compose workflow, no manual `export` or `docker -e` command is required. `generate.py` resolves `${VARIABLE}` references, direct `api_key` values, and the legacy `api_key_env` form. It writes only the required keys to the mode-`0600` generated file `telegraf/paloalto-api.env`, and Docker Compose injects that file into Telegraf. Other `.env` secrets, such as Grafana and InfluxDB administrator passwords, are not passed to the Telegraf container. Generated enriched inventory is mode `0600` and redacts all SNMP and API credentials.
 
 For a one-shot diagnostic from the Linux host rather than from Docker, first generate the runtime files, then let the collector load the protected environment file itself:
 
@@ -335,10 +377,10 @@ API monitoring is configured independently for every Palo Alto entry. Firewalls 
   host: 192.0.2.101
   vendor: paloalto
   snmp_version: 2
-  community: CHANGE_ME_PARIS_SNMP
+  community: ${PARIS_PA_01_SNMP_COMMUNITY}
   api_monitoring:
     enabled: true
-    api_key: CHANGE_ME_PARIS_API_KEY
+    api_key: ${PALOALTO_API_KEY_PARIS_PA_01}
 
 - hostname: LYON-PA-01
   host: 192.0.2.102
@@ -346,9 +388,9 @@ API monitoring is configured independently for every Palo Alto entry. Firewalls 
   snmp_version: 3
   username: fwmon
   auth_protocol: sha256
-  auth_password: CHANGE_ME_LYON_AUTH
+  auth_password: ${LYON_PA_01_SNMP_AUTH}
   priv_protocol: aes256
-  priv_password: CHANGE_ME_LYON_PRIV
+  priv_password: ${LYON_PA_01_SNMP_PRIV}
   api_monitoring:
     enabled: true
     api_key_env: PALOALTO_API_KEY_LYON_PA_01
@@ -357,19 +399,29 @@ API monitoring is configured independently for every Palo Alto entry. Firewalls 
   host: 192.0.2.103
   vendor: paloalto
   snmp_version: 2
-  community: CHANGE_ME_BORDEAUX_SNMP
+  community: ${BORDEAUX_PA_01_SNMP_COMMUNITY}
   # No api_monitoring block: this firewall remains SNMP-only.
 ```
 
 Use a unique `hostname` for every firewall and, when using `.env`, a clear unique variable name for every device. Run `paloalto_api_key.py` once per firewall that needs a generated key, or add existing keys manually. The collector serializes calls within one firewall and polls different firewalls in parallel, so adding a slow device does not block the others.
 
-The collector polls API categories sequentially for each firewall and only parallelizes between firewalls. Session and hardware interface counters use `interval`, which cannot be configured below 10 seconds. Global counters are restricted to a small allowlist of high-value drop/failure counters to bound InfluxDB cardinality and management-plane load.
+The collector polls API categories sequentially for each firewall and only parallelizes between firewalls. Session and hardware interface counters use `interval`, which cannot be configured below 10 seconds. Management-plane process metrics are aggregated by command name and limited to the 32 busiest processes per poll, avoiding PID-based cardinality.
+
+Global counters use the PAN-OS server-side `severity drop` filter. All active drop counters, including their category, aspect, rate, and description, are retained up to `counter_limit` (default `256`, range `16`–`2048`). Priority resource, policy, DoS, allocation, and TCP counters are retained first if the limit is reached. Grafana exposes **Counter category** and **Counter aspect** selectors for interactive filtering. Cumulative values are stored and Grafana calculates rates, avoiding the shared sampling state created by PAN-OS `delta yes`.
 
 The `Palo Alto API Performance Monitoring` dashboard works for both compact and multi-blade systems and reads only PAN-OS XML API measurements. Its main view mirrors the standard dashboard with platform, PAN-OS version, uptime, MP/DP CPU, RAM, sessions, CPS, session utilization, and global throughput. Additional details are grouped into collapsible sections for HA, interfaces, errors/discards, session protocols, drop counters, MP load/storage, and environmental sensors.
 
-Data-plane CPU is tagged by dataplane and core. Grafana creates one collapsible row per dataplane, containing its individual core curves and API resource pressure (sessions, packet buffers, packet descriptors, and software tags when exposed). This supports compact systems and multi-DP chassis such as PA-5500/PA-7000/PA-7500 without requiring a separate API chassis dashboard.
+Data-plane CPU is tagged by dataplane and core. Grafana creates one collapsible row per dataplane, containing its individual core curves and API resource pressure (sessions, packet buffers, packet descriptors, and software tags when exposed). This supports compact systems and multi-DP platforms such as PA-5500/PA-7000/PA-7500; the same series also feed the dedicated high-end/chassis dashboard.
 
 The interface section includes API-derived throughput and packet-rate curves per interface plus current link state, speed, duplex, mode, zone, VSYS, and forwarding instance. Throughput is calculated from deltas of the hardware `ibytes` / `obytes` counters returned by `show counter interface all`; it does not use SNMP or the less reliable session throughput summary.
+
+The separate `Palo Alto API Chassis Monitoring` dashboard targets high-end PA-5200, PA-5400, PA-5500, PA-7000, and PA-7500 platforms. This includes fixed multi-dataplane models such as PA-5580: the API dashboard keeps one curve per returned dataplane/core. On modular models, the dashboard also combines `show chassis inventory`, `show chassis status`, and `show chassis power` for installed-card details, live slot/card state, system role, configuration state, disabled slots, and power. The collector only issues these chassis-specific calls to PA-5450, PA-7050, PA-7080, and PA-7500 models, so a fixed PA-5580 gets its DP, interface, MP, sensor, HA, and counter panels without repeated unsupported-command errors; slot inventory/status/power panels are simply empty.
+
+### API Coverage and Deliberate Limits
+
+The API dashboards intentionally collect the high-value performance and health data that is unavailable, incomplete, or less actionable through the project SNMP views: session protocol counts and utilization, packet rate, MP load/swap/tasks/processes, per-core and per-dataplane CPU, dataplane session/buffer/descriptor pressure, filtered global drop counters with diagnostic metadata, interface zone/VSYS/forwarding context, HA state, storage, environmental sensors, and modular chassis inventory/status/power.
+
+The XML API can expose much more, but “everything available” is not a safe monitoring target. Route/ARP/User-ID tables, full session lists, logs, ACC reports, configuration object counts, and running configuration are deliberately excluded: they can have high or unbounded cardinality, increase management-plane load, reveal sensitive traffic or configuration data, and may require broader API permissions. This project keeps the steady-state collector read-only, bounded, and focused on capacity/load. Add those datasets to a troubleshooting or capacity-planning tool rather than the 20-second performance loop.
 
 ## Upgrade an Existing Installation
 
@@ -472,9 +524,9 @@ Matching `firewalls.yml`:
   snmp_version: 3
   username: fwmon
   auth_protocol: sha256
-  auth_password: CHANGE_ME_AUTH_PASSWORD
+  auth_password: ${PA_440_SNMP_AUTH}
   priv_protocol: aes256
-  priv_password: CHANGE_ME_PRIV_PASSWORD
+  priv_password: ${PA_440_SNMP_PRIV}
 ```
 
 ### Palo Alto SNMPv2c CLI
@@ -492,7 +544,7 @@ Matching `firewalls.yml`:
   host: 192.0.2.101
   vendor: paloalto
   snmp_version: 2
-  community: CHANGE_ME_COMMUNITY
+  community: ${PA_440_SNMP_COMMUNITY}
 ```
 
 Notes:
@@ -549,9 +601,9 @@ Matching `firewalls.yml`:
   snmp_version: 3
   username: fwmon
   auth_protocol: sha256
-  auth_password: CHANGE_ME_AUTH_PASSWORD
+  auth_password: ${FGT_80F_SNMP_AUTH}
   priv_protocol: aes256
-  priv_password: CHANGE_ME_PRIV_PASSWORD
+  priv_password: ${FGT_80F_SNMP_PRIV}
 ```
 
 ### Fortinet SNMPv2c CLI
@@ -590,7 +642,7 @@ Matching `firewalls.yml`:
   host: 192.0.2.102
   vendor: fortinet
   snmp_version: 2
-  community: CHANGE_ME_COMMUNITY
+  community: ${FGT_80F_SNMP_COMMUNITY}
 ```
 
 ## Discovery
@@ -686,6 +738,10 @@ These files/directories are generated locally and ignored by Git:
 - Palo Alto Networks operational commands through the XML API: https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions/run-operational-mode-commands-api
 - Palo Alto Networks operational CLI command hierarchy: https://docs.paloaltonetworks.com/ngfw/pan-os-cli-quick-start/cli-command-hierarchy
 - Palo Alto Networks XML API request structure and authentication: https://docs.paloaltonetworks.com/ngfw/api/getting-started/structure-of-a-pan-os-xml-api-request
+- Palo Alto Networks global counter troubleshooting and filters: https://knowledgebase.paloaltonetworks.com/KCSArticleDetail?id=kA10g000000ClXOCA0
+- Palo Alto Networks guidance for high dataplane CPU: https://live.paloaltonetworks.com/t5/support-faq/support-faq-how-to-handle-high-data-plane-cpu-issues/ta-p/592941
+- Palo Alto Networks PA-7000 slot states: https://docs.paloaltonetworks.com/hardware/pa-7000-hardware-reference/service-the-pa-7000-series-hardware/replace-a-pa-7000-series-front-slot-card/replace-a-pa-7000-series-network-processing-card-npc/pa-7000-series-front-slot-states
+- Palo Alto Networks PA-7000 power statistics: https://docs.paloaltonetworks.com/hardware/pa-7000-hardware-reference/PA-7000-series-firewall-installation/connect-power-to-a-pa-7000-series-firewall/view-pa-7000-series-firewall-power-statistics
 - Palo Alto Networks CLI command hierarchy for SNMPv3: https://docs.paloaltonetworks.com/pan-os/11-1/pan-os-cli-quick-start/cli-command-hierarchy/pan-os-11-1-configure-cli-command-hierarchy
 - Fortinet `config system snmp user`: https://docs.fortinet.com/document/fortigate/7.6.3/cli-reference/292257317/config-system-snmp-user
 - Fortinet `config system snmp community`: https://docs.fortinet.com/document/fortigate/7.0.1/cli-reference/54620/config-system-snmp-community

@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "grafana/provisioning/dashboards/Palo_API_Dashboard.json"
+CHASSIS_OUTPUT = ROOT / "grafana/provisioning/dashboards/Palo_API_Chassis_Dashboard.json"
 DATASOURCE = {"type": "influxdb", "uid": "P951FEA4DE68E13C5"}
 
 
@@ -322,13 +323,13 @@ from(bucket: "firewalls")
             timeseries(16, "Selected Drop / Failure Counters", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_counters" and r.hostname == "${hostname}" and r._field == "value")
+  |> filter(fn: (r) => r._measurement == "paloalto_api_counters" and r.hostname == "${hostname}" and r._field == "value" and r.category =~ /^${counter_category:regex}$/ and r.aspect =~ /^${counter_aspect:regex}$/)
   |> derivative(unit: 1s, nonNegative: true)
   |> map(fn: (r) => ({ r with _field: r.counter }))
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 37, 24, 12, "ops", "A bounded allowlist prevents uncontrolled time-series cardinality."),
+''', 0, 37, 24, 12, "ops", "PAN-OS severity=drop filter; use the Category and Aspect selectors above. Cardinality is bounded by counter_limit."),
         ]),
         row(9005, "Advanced Resource Troubleshooting - Management Plane", 37, [
             timeseries(17, "Management Plane Load Average", '''
@@ -355,6 +356,22 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)
 ''', 0, 48, 24, 10, "percent"),
+            timeseries(22, "Management Plane Swap", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_management" and r.hostname == "${hostname}" and r._field == "swap_used_pct")
+  |> map(fn: (r) => ({ r with _field: "Swap used" }))
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+''', 0, 58, 12, 9, "percent"),
+            timeseries(23, "Top Management Plane Processes", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_processes" and r.hostname == "${hostname}" and r._field == "cpu_pct")
+  |> map(fn: (r) => ({ r with _field: r.process }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 12, 58, 12, 9, "percent", "Aggregated by process name to avoid PID cardinality."),
         ]),
         row(9100, "Chassis and Environmental Sensors", 38, [
             timeseries(20, "Environmental Sensor Values", '''
@@ -416,6 +433,14 @@ from(bucket: "firewalls")
   |> distinct(column: "_value")
   |> sort(columns: ["_value"])
 '''
+    counter_category_query = '''
+import "influxdata/influxdb/schema"
+schema.tagValues(bucket: "firewalls", tag: "category", predicate: (r) => r._measurement == "paloalto_api_counters" and r.hostname == "${hostname}", start: -7d)
+'''
+    counter_aspect_query = '''
+import "influxdata/influxdb/schema"
+schema.tagValues(bucket: "firewalls", tag: "aspect", predicate: (r) => r._measurement == "paloalto_api_counters" and r.hostname == "${hostname}", start: -7d)
+'''
     return {
         "annotations": {"list": []},
         "description": "Palo Alto performance monitoring through the PAN-OS XML API with SNMP-dashboard layout, per-dataplane drill-down, interface detail and API-only resource metrics.",
@@ -431,6 +456,8 @@ from(bucket: "firewalls")
         "tags": ["paloalto", "xml-api", "firewall", "performance"],
         "templating": {"list": [
             variable("hostname", "Firewall", hostname_query),
+            variable("counter_category", "Counter category", counter_category_query, multi=True, include_all=True),
+            variable("counter_aspect", "Counter aspect", counter_aspect_query, multi=True, include_all=True),
             variable("info_version", "Version", info_query("panos_version"), hidden=True),
             variable("info_platform", "Platform", info_query("model"), hidden=True),
             variable("info_ha", "HA", ha_query, hidden=True),
@@ -447,9 +474,285 @@ from(bucket: "firewalls")
     }
 
 
+def build_chassis_dashboard() -> dict:
+    panels = [
+        stat(2001, "Uptime", '''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_system" and r.hostname == "${hostname}" and r._field == "uptime_seconds")
+  |> group()
+  |> last()
+  |> map(fn: (r) => ({ _time: r._time, _field: "Uptime", _value: float(v: r._value) / 86400.0 }))
+''', 0, 0, 4, "suffix: days", 1),
+        text_value(2002, "Version", "info_version", 4, 0, 6),
+        text_value(2003, "Platform", "info_platform", 10, 0, 6),
+        text_value(2004, "HA Status", "info_ha", 16, 0, 8),
+        timeseries(2005, "Dataplane CPU by Slot / DP", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r.core == "average" and r._field == "cpu_pct")
+  |> map(fn: (r) => ({ r with _field: r.dataplane }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 0, 4, 12, 10, "percent", "Average CPU for every dataplane returned by the chassis."),
+        timeseries(2006, "Dataplane Resource Pressure", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_resources" and r.hostname == "${hostname}" and r._field == "utilization_pct")
+  |> map(fn: (r) => ({ r with _field: r.dataplane + " " + r.resource }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 12, 4, 12, 10, "percent"),
+        timeseries(2007, "Chassis Interface Throughput", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and exists r.interface and r.interface !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.interface !~ /\\./ and r._field =~ /^(in|out)_octets$/)
+  |> derivative(unit: 1s, nonNegative: true)
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: if r._field == "in_octets" then "In" else "Out" }))
+  |> group(columns: ["_time", "_field"])
+  |> sum()
+  |> group(columns: ["_field"])
+''', 0, 14, 24, 9, "bps"),
+    ]
+
+    panels.extend([
+        row(9201, "Chassis Slot Inventory", 23, [
+            table(2010, "Installed Cards", '''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_chassis_inventory" and r.hostname == "${hostname}")
+  |> group(columns: ["slot", "card_type", "_field"])
+  |> last()
+  |> group()
+  |> pivot(rowKey: ["slot", "card_type"], columnKey: ["_field"], valueColumn: "_value")
+  |> sort(columns: ["slot"])
+''', 0, 24, 12, 11, "Inventory from show chassis inventory. Serial numbers remain in the local monitoring database."),
+            table(2024, "Live Slot State", '''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_chassis_status" and r.hostname == "${hostname}")
+  |> group(columns: ["slot", "card_type", "_field"])
+  |> last()
+  |> group()
+  |> pivot(rowKey: ["slot", "card_type"], columnKey: ["_field"], valueColumn: "_value")
+  |> sort(columns: ["slot"])
+''', 12, 24, 12, 11, "Operational state, role and configuration state from show chassis status."),
+        ]),
+        row(9202, "Chassis Power", 24, [
+            timeseries(2011, "Power by Component", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_chassis_power" and r.hostname == "${hostname}" and r._field == "power_w")
+  |> map(fn: (r) => ({ r with _field: r.slot + " " + r.component }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)
+''', 0, 25, 14, 10, "watt"),
+            table(2012, "Power / Card Status", '''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_chassis_power" and r.hostname == "${hostname}" and r._field == "status")
+  |> group(columns: ["slot", "component"])
+  |> last()
+  |> group()
+  |> keep(columns: ["slot", "component", "_value"])
+  |> rename(columns: {_value: "status"})
+  |> sort(columns: ["slot"])
+''', 14, 25, 10, 10),
+        ]),
+        row(9203, "Dataplane ${dataplane}", 25, [
+            timeseries(2013, "CPU per Core - ${dataplane}", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r.core != "average" and r._field == "cpu_pct")
+  |> map(fn: (r) => ({ r with _field: "Core " + r.core }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 0, 26, 12, 10, "percent"),
+            timeseries(2014, "Resource Pressure - ${dataplane}", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_resources" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r._field == "utilization_pct")
+  |> map(fn: (r) => ({ r with _field: r.resource }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 12, 26, 12, 10, "percent"),
+        ], repeat="dataplane"),
+        row(9204, "Thermal, Fans and Power Sensors", 26, [
+            timeseries(2015, "Temperatures by Slot", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "thermal" and r._field == "degrees_c")
+  |> map(fn: (r) => ({ r with _field: r.slot + " " + r.description }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+''', 0, 27, 12, 10, "celsius"),
+            timeseries(2016, "Fan Speed by Slot", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "fan" and r._field == "rpm")
+  |> map(fn: (r) => ({ r with _field: r.slot + " " + r.description }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+''', 12, 27, 12, 10, "rpm"),
+            timeseries(2017, "Power Sensor Values", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r.sensor_type == "power" and r._field =~ /^(watts|volts|amps|value)$/)
+  |> map(fn: (r) => ({ r with _field: r.slot + " " + r.description + " " + r._field }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+''', 0, 37, 12, 10, "short"),
+            table(2018, "Environmental Alarms", '''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sensors" and r.hostname == "${hostname}" and r._field == "alarm")
+  |> group(columns: ["sensor_type", "slot", "description"])
+  |> last()
+  |> group()
+  |> keep(columns: ["sensor_type", "slot", "description", "_value"])
+  |> rename(columns: {_value: "alarm"})
+''', 12, 37, 12, 10),
+        ]),
+        row(9205, "Interfaces by Slot", 27, [
+            timeseries(2019, "Throughput by Interface", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${hostname}" and r._field =~ /^(in|out)_octets$/)
+  |> derivative(unit: 1s, nonNegative: true)
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> map(fn: (r) => ({ r with _value: r._value * 8.0, _field: r.interface + (if r._field == "in_octets" then " In" else " Out") }))
+  |> group(columns: ["_field"])
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 0, 28, 24, 11, "bps"),
+        ]),
+        row(9206, "Management Plane and Processes", 28, [
+            timeseries(2020, "MP CPU / RAM / Swap", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_management" and r.hostname == "${hostname}" and r._field =~ /^(mp_cpu_pct|memory_used_pct|swap_used_pct)$/)
+  |> map(fn: (r) => ({ r with _field: if r._field == "mp_cpu_pct" then "CPU" else if r._field == "memory_used_pct" then "RAM" else "Swap" }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+''', 0, 29, 12, 10, "percent"),
+            timeseries(2021, "Top MP Processes", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_processes" and r.hostname == "${hostname}" and r._field == "cpu_pct")
+  |> map(fn: (r) => ({ r with _field: r.process }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 12, 29, 12, 10, "percent"),
+        ]),
+        row(9207, "HA Role Changes", 29, [
+            state_timeline(2022, "HA Role Changes", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_ha" and r.hostname == "${hostname}" and r._field == "state")
+  |> map(fn: (r) => ({ r with _field: "HA role" }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 30),
+        ]),
+        row(9208, "Filtered Global Drop Counters", 30, [
+            timeseries(2023, "Active Drop Counters", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_counters" and r.hostname == "${hostname}" and r._field == "value" and r.category =~ /^${counter_category:regex}$/ and r.aspect =~ /^${counter_aspect:regex}$/)
+  |> derivative(unit: 1s, nonNegative: true)
+  |> map(fn: (r) => ({ r with _field: r.counter }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 0, 31, 24, 11, "ops", "PAN-OS server-side severity=drop filter; cumulative counters are converted to rates in Flux."),
+        ]),
+    ])
+
+    hostname_query = '''
+from(bucket: "firewalls")
+  |> range(start: -30d)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_system" and r._field == "model" and r._value =~ /^PA-(52|54|55|70|75)[0-9]+/)
+  |> map(fn: (r) => ({ _value: r.hostname }))
+  |> group()
+  |> distinct(column: "_value")
+  |> sort(columns: ["_value"])
+'''
+    info_query = lambda field: f'''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_system" and r.hostname == "${{hostname}}" and r._field == "{field}")
+  |> group()
+  |> last()
+  |> keep(columns: ["_value"])
+'''
+    ha_query = '''
+from(bucket: "firewalls")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_ha" and r.hostname == "${hostname}" and r._field == "state")
+  |> group()
+  |> last()
+  |> keep(columns: ["_value"])
+'''
+    dataplane_query = '''
+from(bucket: "firewalls")
+  |> range(start: -7d)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r._field == "cpu_pct")
+  |> map(fn: (r) => ({ _value: r.dataplane }))
+  |> group()
+  |> distinct(column: "_value")
+  |> sort(columns: ["_value"])
+'''
+    counter_category_query = '''
+import "influxdata/influxdb/schema"
+schema.tagValues(bucket: "firewalls", tag: "category", predicate: (r) => r._measurement == "paloalto_api_counters" and r.hostname == "${hostname}", start: -7d)
+'''
+    counter_aspect_query = '''
+import "influxdata/influxdb/schema"
+schema.tagValues(bucket: "firewalls", tag: "aspect", predicate: (r) => r._measurement == "paloalto_api_counters" and r.hostname == "${hostname}", start: -7d)
+'''
+    return {
+        "annotations": {"list": []},
+        "description": "API-only Palo Alto high-end and modular platform monitoring for dataplanes, interfaces, environment, and chassis slot inventory/state/power when supported.",
+        "editable": True,
+        "fiscalYearStartMonth": 0,
+        "graphTooltip": 1,
+        "id": None,
+        "links": [],
+        "liveNow": False,
+        "panels": panels,
+        "refresh": "20s",
+        "schemaVersion": 39,
+        "tags": ["paloalto", "xml-api", "chassis", "performance"],
+        "templating": {"list": [
+            variable("hostname", "Firewall", hostname_query),
+            variable("counter_category", "Counter category", counter_category_query, multi=True, include_all=True),
+            variable("counter_aspect", "Counter aspect", counter_aspect_query, multi=True, include_all=True),
+            variable("info_version", "Version", info_query("panos_version"), hidden=True),
+            variable("info_platform", "Platform", info_query("model"), hidden=True),
+            variable("info_ha", "HA", ha_query, hidden=True),
+            variable("dataplane", "Dataplane", dataplane_query, hidden=True, multi=True, include_all=True),
+        ]},
+        "time": {"from": "now-6h", "to": "now"},
+        "timepicker": {},
+        "timezone": "browser",
+        "title": "Palo Alto API Chassis Monitoring",
+        "uid": "paloalto-api-chassis",
+        "version": 1,
+        "weekStart": "",
+    }
+
+
 def main() -> int:
     OUTPUT.write_text(json.dumps(build_dashboard(), indent=2) + "\n", encoding="utf-8")
     print(f"Wrote {OUTPUT.relative_to(ROOT)}")
+    CHASSIS_OUTPUT.write_text(json.dumps(build_chassis_dashboard(), indent=2) + "\n", encoding="utf-8")
+    print(f"Wrote {CHASSIS_OUTPUT.relative_to(ROOT)}")
     return 0
 
 

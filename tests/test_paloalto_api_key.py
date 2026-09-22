@@ -2,10 +2,20 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
-from paloalto_api_key import environment_name, update_env, update_inventory, validate_target
+from paloalto_api_key import (
+    effective_api_host,
+    environment_name,
+    main,
+    resolve_inventory_target,
+    select_inventory_entry,
+    update_env,
+    update_inventory,
+    validate_target,
+)
 
 
 class ApiKeySetupTests(unittest.TestCase):
@@ -15,6 +25,47 @@ class ApiKeySetupTests(unittest.TestCase):
     def test_target_rejects_url_instead_of_bare_host(self):
         with self.assertRaisesRegex(ValueError, "bare IP address"):
             validate_target("https://192.0.2.10/api", 443)
+
+    def test_interactive_inventory_selection_lists_only_palo_alto(self):
+        inventory = [
+            {"hostname": "PA-PARIS", "host": "192.0.2.10", "vendor": "paloalto"},
+            {"hostname": "FGT-PARIS", "host": "192.0.2.20", "vendor": "fortinet"},
+            {
+                "hostname": "PA-LYON",
+                "host": "192.0.2.30",
+                "vendor": "paloalto",
+                "api_monitoring": {"enabled": True, "host": "api-pa-lyon.example.test"},
+            },
+        ]
+        output = []
+        selected = select_inventory_entry(
+            inventory,
+            input_fn=mock.Mock(side_effect=["invalid", "2"]),
+            output_fn=output.append,
+        )
+        self.assertEqual(selected["hostname"], "PA-LYON")
+        self.assertTrue(any("PA-PARIS" in line for line in output))
+        self.assertTrue(any("api-pa-lyon.example.test" in line for line in output))
+        self.assertFalse(any("FGT-PARIS" in line for line in output))
+        self.assertTrue(any("Invalid selection" in line for line in output))
+
+    def test_hostname_flag_resolves_declared_api_host(self):
+        inventory = [{
+            "hostname": "PA-LYON",
+            "host": "192.0.2.30",
+            "api_monitoring": {"host": "api-pa-lyon.example.test"},
+        }]
+        firewall, host, hostname = resolve_inventory_target(inventory, None, "PA-LYON")
+        self.assertEqual(firewall["hostname"], "PA-LYON")
+        self.assertEqual(host, "api-pa-lyon.example.test")
+        self.assertEqual(hostname, "PA-LYON")
+        self.assertEqual(effective_api_host(firewall), host)
+
+    def test_selection_rejects_inventory_without_palo_alto(self):
+        with self.assertRaisesRegex(ValueError, "does not contain a Palo Alto"):
+            select_inventory_entry([
+                {"hostname": "FGT-PARIS", "host": "192.0.2.20", "vendor": "fortinet"}
+            ])
 
     def test_update_env_replaces_key_and_sets_private_mode(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -41,7 +92,11 @@ class ApiKeySetupTests(unittest.TestCase):
             )
             data = yaml.safe_load(path.read_text(encoding="utf-8"))
             self.assertTrue(Path(backup).is_file())
-            self.assertEqual(data[0]["api_monitoring"]["api_key_env"], "PALOALTO_API_KEY_PA_440")
+            self.assertEqual(
+                data[0]["api_monitoring"]["api_key"],
+                "${PALOALTO_API_KEY_PA_440}",
+            )
+            self.assertNotIn("api_key_env", data[0]["api_monitoring"])
             self.assertFalse(data[0]["api_monitoring"]["verify_tls"])
 
     def test_update_inventory_can_store_key_directly(self):
@@ -86,6 +141,55 @@ class ApiKeySetupTests(unittest.TestCase):
             data = yaml.safe_load(path.read_text(encoding="utf-8"))
             self.assertEqual(data[0]["host"], "192.0.2.10")
             self.assertEqual(data[0]["api_monitoring"]["host"], "api-pa.example.test")
+
+    def test_update_inventory_preserves_existing_polling_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "firewalls.yml"
+            path.write_text(
+                "- hostname: PA-440\n  host: 192.0.2.10\n  api_monitoring:\n"
+                "    enabled: true\n    api_key_env: OLD_KEY\n    interval: 30\n"
+                "    counter_limit: 512\n",
+                encoding="utf-8",
+            )
+            update_inventory(
+                path,
+                "192.0.2.10",
+                "PA-440",
+                True,
+                443,
+                api_key_env="NEW_KEY",
+            )
+            api_config = yaml.safe_load(path.read_text(encoding="utf-8"))[0]["api_monitoring"]
+            self.assertEqual(api_config["api_key"], "${NEW_KEY}")
+            self.assertNotIn("api_key_env", api_config)
+            self.assertEqual(api_config["interval"], 30)
+            self.assertEqual(api_config["counter_limit"], 512)
+
+    def test_main_interactive_selection_writes_env_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            inventory = Path(directory) / "firewalls.yml"
+            env_file = Path(directory) / ".env"
+            inventory.write_text(
+                "- hostname: PA-PARIS\n  host: 192.0.2.10\n  vendor: paloalto\n"
+                "- hostname: PA-LYON\n  host: 192.0.2.11\n  vendor: paloalto\n",
+                encoding="utf-8",
+            )
+            with mock.patch("builtins.input", return_value="2"), mock.patch(
+                "getpass.getpass", return_value="password"
+            ), mock.patch("paloalto_api_key.generate_key", return_value="generated-secret") as generate:
+                result = main([
+                    "--inventory", str(inventory),
+                    "--env-file", str(env_file),
+                    "--username", "api-monitor",
+                ])
+            self.assertEqual(result, 0)
+            generate.assert_called_once_with("192.0.2.11", "api-monitor", "password", 443, True, 15)
+            data = yaml.safe_load(inventory.read_text(encoding="utf-8"))
+            self.assertEqual(
+                data[1]["api_monitoring"]["api_key"],
+                "${PALOALTO_API_KEY_PA_LYON}",
+            )
+            self.assertIn("PALOALTO_API_KEY_PA_LYON=generated-secret", env_file.read_text())
 
 
 if __name__ == "__main__":

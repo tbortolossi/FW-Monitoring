@@ -7,16 +7,21 @@ from unittest import mock
 
 from telegraf.paloalto_api_collector import (
     ApiError,
+    collect_firewall,
     line_protocol,
     load_environment_file,
     parse_dataplane_resources,
     parse_dataplane_utilization,
+    parse_chassis_inventory,
+    parse_chassis_power,
+    parse_chassis_status,
     parse_environmentals,
     parse_global_counters,
     parse_ha_state,
     parse_interface_counters,
     parse_interface_status,
     parse_management_resources,
+    parse_management_processes,
     parse_sessions,
     parse_storage,
     parse_system_info,
@@ -59,13 +64,30 @@ class CollectorParsingTests(unittest.TestCase):
     def test_management_cpu_and_memory(self):
         result = ET.fromstring(
             "<result>top - load average: 0.25, 0.50, 0.75\n"
-            "%Cpu(s): 10.0 us, 5.0 sy, 85.0 id\n"
-            "MiB Mem : 1000 total, 250 free, 750 used, 0 buff/cache</result>"
+            "Tasks: 100 total, 2 running, 96 sleeping, 1 stopped, 1 zombie\n"
+            "%Cpu(s): 10.0 us, 5.0 sy, 84.0 id, 1.0 wa\n"
+            "MiB Mem : 1000 total, 250 free, 750 used, 0 buff/cache\n"
+            "MiB Swap: 200 total, 150 free, 50 used</result>"
         )
         metrics = parse_management_resources(result)
-        self.assertEqual(metrics["mp_cpu_pct"], 15.0)
+        self.assertEqual(metrics["mp_cpu_pct"], 16.0)
+        self.assertEqual(metrics["cpu_iowait_pct"], 1.0)
         self.assertEqual(metrics["memory_used_pct"], 75.0)
         self.assertEqual(metrics["memory_total_bytes"], 1000 * 1024**2)
+        self.assertEqual(metrics["swap_used_pct"], 25.0)
+        self.assertEqual(metrics["tasks_zombie"], 1)
+
+    def test_management_processes_are_aggregated_by_name(self):
+        result = ET.fromstring(
+            "<result>PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND\n"
+            "123 root 20 0 100m 20m 4m R 40.0 2.0 1:00 pan_task\n"
+            "124 root 20 0 110m 30m 4m R 35.0 3.0 1:00 pan_task\n"
+            "200 root 20 0 50m 10m 2m S 5.0 1.0 0:10 mgmtsrvr</result>"
+        )
+        indexed = {tags["process"]: fields for tags, fields in parse_management_processes(result)}
+        self.assertEqual(indexed["pan_task"]["cpu_pct"], 75.0)
+        self.assertEqual(indexed["pan_task"]["processes"], 2)
+        self.assertEqual(indexed["pan_task"]["resident_bytes"], 50 * 1024**2)
 
     def test_legacy_top_format(self):
         result = ET.fromstring(
@@ -133,14 +155,23 @@ class CollectorParsingTests(unittest.TestCase):
             ],
         )
 
-    def test_global_counter_allowlist_bounds_cardinality(self):
+    def test_global_counters_keep_metadata_and_bound_cardinality(self):
         result = ET.fromstring(
             "<result><counters>"
-            "<entry><name>flow_policy_deny</name><value>42</value></entry>"
-            "<entry><name>unbounded_random_counter</name><value>99</value></entry>"
+            "<entry><name>flow_policy_deny</name><value>42</value><rate>3</rate>"
+            "<severity>drop</severity><category>flow</category><aspect>session</aspect>"
+            "<description>Policy denied</description></entry>"
+            "<entry><name>another_drop</name><value>99</value><rate>10</rate></entry>"
             "</counters></result>"
         )
-        self.assertEqual(parse_global_counters(result), [({"counter": "flow_policy_deny"}, {"value": 42})])
+        points = parse_global_counters(result, limit=1)
+        self.assertEqual(points[0][0]["counter"], "flow_policy_deny")
+        self.assertEqual(points[0][0]["severity"], "drop")
+        self.assertEqual(points[0][1], {"value": 42, "rate": 3, "description": "Policy denied"})
+        all_points = parse_global_counters(result, limit=2)
+        fallback = next(point for point in all_points if point[0]["counter"] == "another_drop")
+        self.assertEqual(fallback[0]["category"], "unknown")
+        self.assertEqual(fallback[0]["aspect"], "unknown")
 
     def test_hardware_interface_octet_counters_are_collected(self):
         result = ET.fromstring(
@@ -225,6 +256,94 @@ class CollectorParsingTests(unittest.TestCase):
                 )
             ],
         )
+
+    def test_chassis_inventory_exposes_slots_and_card_types(self):
+        result = ET.fromstring(
+            "<result><chassis><slots>"
+            '<entry name="s1"><component>PA-7500-MPC-A</component>'
+            "<serial>ABC123</serial><hw-version>1.0</hw-version><operational-status>Up</operational-status></entry>"
+            '<entry name="s2"><component>PA-7500-NC-A</component><operational-status>Up</operational-status></entry>'
+            "</slots></chassis></result>"
+        )
+        points = parse_chassis_inventory(result)
+        self.assertEqual(points[0][0], {"slot": "s1", "card_type": "supervisor"})
+        self.assertEqual(points[0][1]["status"], "Up")
+        self.assertEqual(points[1][0]["card_type"], "linecard")
+
+    def test_chassis_power_exposes_component_watts(self):
+        result = ET.fromstring(
+            "<result><chassis><power><slots>"
+            '<entry name="s1"><component>PA-7500-NC-A</component><card-status>Up</card-status><power>350</power></entry>'
+            "</slots></power></chassis></result>"
+        )
+        self.assertEqual(
+            parse_chassis_power(result)[0],
+            ({"slot": "s1", "component": "PA-7500-NC-A"}, {"status": "Up", "power_w": 350}),
+        )
+
+    def test_chassis_status_exposes_each_slot_state(self):
+        result = ET.fromstring(
+            "<result><status><entry><family>7500</family><slot>1</slot>"
+            "<component>PA-7500-MPC-A</component><type>mpc</type><status>Up</status>"
+            "<sysrole>active</sysrole><config>success</config><detail>Ready</detail>"
+            "<config_detail>In sync</config_detail><disabled>no</disabled></entry>"
+            "<entry><family>7500</family><slot>2</slot><component>PA-7500-NC-A</component>"
+            "<type>nc</type><status>Down</status><disabled>yes</disabled></entry></status></result>"
+        )
+        points = parse_chassis_status(result)
+        self.assertEqual(points[0][0], {"slot": "1", "card_type": "supervisor"})
+        self.assertEqual(points[0][1]["system_role"], "active")
+        self.assertFalse(points[0][1]["disabled"])
+        self.assertEqual(points[1][0]["card_type"], "linecard")
+        self.assertTrue(points[1][1]["disabled"])
+
+    def test_chassis_calls_are_skipped_for_fixed_platforms(self):
+        config = {"hostname": "fixed", "host": "192.0.2.1", "api_key_env": "KEY"}
+        system = ET.fromstring("<result><system><model>PA-440</model></system></result>")
+        with mock.patch(
+            "telegraf.paloalto_api_collector.request_xml",
+            return_value=system,
+        ) as request:
+            collect_firewall(config, {"system", "chassis_inventory", "chassis_status", "chassis_power"})
+        self.assertEqual(request.call_count, 1)
+        self.assertFalse(config["_is_chassis"])
+
+    def test_chassis_calls_run_after_api_model_detection(self):
+        config = {"hostname": "chassis", "host": "192.0.2.1", "api_key_env": "KEY"}
+        responses = {
+            "system": ET.fromstring("<result><system><model>PA-7500</model></system></result>"),
+            "inventory": ET.fromstring(
+                '<result><chassis><slots><entry name="s1"><component>PA-7500-MPC-A</component></entry>'
+                "</slots></chassis></result>"
+            ),
+            "power": ET.fromstring("<result><chassis><power/></chassis></result>"),
+            "status": ET.fromstring(
+                "<result><status><entry><slot>1</slot><component>PA-7500-MPC-A</component>"
+                "<status>Up</status></entry></status></result>"
+            ),
+        }
+
+        def response_for(_config, command):
+            if "<system><info" in command:
+                return responses["system"]
+            if "<inventory>" in command:
+                return responses["inventory"]
+            if "<status>" in command:
+                return responses["status"]
+            return responses["power"]
+
+        with mock.patch(
+            "telegraf.paloalto_api_collector.request_xml",
+            side_effect=response_for,
+        ) as request:
+            lines = collect_firewall(
+                config,
+                {"system", "chassis_inventory", "chassis_status", "chassis_power"},
+            )
+        self.assertEqual(request.call_count, 4)
+        self.assertTrue(config["_is_chassis"])
+        self.assertTrue(any(line.startswith("paloalto_api_chassis_inventory") for line in lines))
+        self.assertTrue(any(line.startswith("paloalto_api_chassis_status") for line in lines))
 
     def test_line_protocol_escapes_tags_and_types(self):
         line = line_protocol("metric", {"hostname": "pa, one"}, {"count": 3, "ratio": 1.5, "state": "up"})
