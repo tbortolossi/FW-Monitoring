@@ -1,29 +1,42 @@
-FROM telegraf:1.40.1
+FROM debian:bookworm-slim AS mib-downloader
 
-# 1) Enable non-free repositories for snmp-mibs-downloader.
+# Fetch the standard IANA/IETF MIB corpus in a build-only stage. Alpine ships
+# the common IF/HOST-RESOURCES MIBs but not the ENTITY MIBs used by chassis
+# monitoring. No Debian package or library is copied into the runtime image.
 RUN echo "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] \
      http://deb.debian.org/debian bookworm contrib non-free non-free-firmware" \
      > /etc/apt/sources.list.d/nonfree.list && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates python3 snmp snmp-mibs-downloader && \
+        ca-certificates snmp-mibs-downloader && \
     download-mibs && \
-    # 2) Allow Net-SNMP to load all discovered MIBs.
-    sed -i 's/^mibs *:/# &/' /etc/snmp/snmp.conf && \
-    # 3) Remove the old SNMPv2-PDU file to avoid the "Bad operator" warning.
-    rm -f /usr/share/snmp/mibs/ietf/SNMPv2-PDU && \
-    # 4) Cleanup.
+    rm -f /var/lib/mibs/ietf/SNMPv2-PDU && \
     rm -rf /var/lib/apt/lists/*
 
-# 5) Vendor MIBs (Palo Alto + Fortinet).
+FROM telegraf:1.40.1-alpine
+
+USER root
+
+RUN apk add --no-cache python3 net-snmp-tools && \
+    # Keep the UID used by the previous Debian runtime so existing bind-mounted
+    # logs remain writable during an in-place upgrade.
+    sed -i 's/^telegraf:x:100:101:/telegraf:x:999:101:/' /etc/passwd && \
+    grep -q '^telegraf:x:999:101:' /etc/passwd && \
+    chown -R 999:101 /etc/telegraf /home/telegraf
+
+COPY --from=mib-downloader /var/lib/mibs/ /var/lib/mibs/
+RUN ln -s /var/lib/mibs/iana /usr/share/snmp/mibs/iana && \
+    ln -s /var/lib/mibs/ietf /usr/share/snmp/mibs/ietf
+
+# Vendor MIBs (Palo Alto + Fortinet).
 RUN mkdir -p /usr/share/snmp/mibs/vendors/paloalto \
              /usr/share/snmp/mibs/vendors/fortinet
 COPY mibs/ /usr/share/snmp/mibs/vendors/
 
-# 6) Generated Telegraf config.
+# Generated Telegraf config.
 #COPY telegraf.conf /etc/telegraf/telegraf.conf
 
-# 7) Always load all MIBs.
+# Always load all MIBs.
 
 # Net-SNMP paths.
 ENV MIBDIRS=/usr/share/snmp/mibs:\

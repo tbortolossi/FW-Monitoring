@@ -147,6 +147,8 @@ The project generator is Python-based:
 - `requirements.txt` contains the Python dependencies: `PyYAML` and `Jinja2`.
 - `requirements-dev.txt` adds the coverage and dependency-audit tools used by CI.
 
+The custom Telegraf runtime uses the official `telegraf:1.40.1-alpine` image. A build-only Debian stage downloads the standard IANA/IETF MIB corpus required for ENTITY-based chassis monitoring; Debian packages are not copied into the final image. The runtime preserves Telegraf UID `999` so log volumes created by earlier Debian-based releases remain writable during an in-place upgrade. The resulting runtime supports `amd64` and `arm64`. The upstream Alpine image does not publish an `arm/v7` variant; use a supported 64-bit host architecture.
+
 On each run, the generator:
 
 - loads and validates `firewalls.yml`
@@ -685,7 +687,7 @@ PALO_MIB_VERSION=10-2 ./generate.sh
 
 ## Validate
 
-Every pull request and push to `main` runs GitHub Actions on Python 3.11 and 3.12. CI executes the unit tests with branch coverage, enforces a 75% project coverage floor, checks that generated dashboards are current, compiles all Python sources, validates `generate.sh` and Docker Compose, audits runtime and CI dependencies, scans tracked files for secrets and configuration problems, builds the custom Telegraf image, and scans it for high or critical vulnerabilities. The image job reports every finding and blocks on vulnerabilities with an available fix. Any temporary exception must be scoped, justified, and dated in `.trivyignore.yaml` and `SECURITY.md`. The checks also run every Monday and can be started manually.
+Every pull request and push to `main` runs GitHub Actions on Python 3.11 and 3.12. CI executes the unit tests with branch coverage, enforces a 75% project coverage floor, checks that generated dashboards are current, compiles all Python sources, validates `generate.sh` and Docker Compose, audits runtime and CI dependencies, scans tracked files for secrets and configuration problems, builds the custom Telegraf image, smoke-tests its unprivileged user and chassis MIB translations, and scans it for high or critical vulnerabilities. The image job reports every finding and blocks on vulnerabilities with an available fix. Any temporary exception must be scoped, justified, and dated in `.trivyignore.yaml` and `SECURITY.md`. The checks also run every Monday and can be started manually.
 
 Run the same core checks locally:
 
