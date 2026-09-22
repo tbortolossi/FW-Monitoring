@@ -1,0 +1,15 @@
+[run]
+branch = True
+source =
+    generate
+    paloalto_api_key
+    scripts.build_paloalto_api_dashboard
+    telegraf.paloalto_api_collector
+
+[report]
+fail_under = 75
+show_missing = True
+skip_empty = True
+
+[xml]
+output = coverage.xml

@@ -1,0 +1,11 @@
+vulnerabilities:
+  - id: CVE-2026-84445
+    paths:
+      - usr/bin/telegraf
+    expired_at: 2026-10-31
+    statement: >-
+      Telegraf 1.40.1 is the latest stable upstream release. The vulnerable
+      gRPC-Go code is embedded in the binary, but this stack enables only SNMP
+      and execd inputs and exposes no gRPC listener. Remove this exception as
+      soon as an upstream Telegraf image containing the fixed gRPC-Go release
+      is available.

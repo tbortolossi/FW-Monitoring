@@ -534,7 +534,10 @@ def parse_environmentals(result: ET.Element, sensor_type: str) -> list[tuple[dic
             if destination:
                 value = _number(child.text)
                 if value is not None:
-                    fields[destination] = value
+                    # PAN-OS may format the same temperature as "42" and
+                    # later "42.5". Keep its InfluxDB field type stable while
+                    # preserving the established integer type of min/max/RPM.
+                    fields[destination] = float(value) if destination == "degrees_c" else value
         alarm = (entry.findtext("alarm") or "").strip()
         if alarm:
             fields["alarm"] = alarm
@@ -799,7 +802,18 @@ def load_environment_file(path: Path) -> None:
         name = name.strip()
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
             raise ValueError(f"invalid environment variable name in {path}: {name!r}")
-        os.environ.setdefault(name, value.strip())
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] == "'":
+            encoded = value[1:-1]
+            decoded = []
+            index = 0
+            while index < len(encoded):
+                if encoded[index] == "\\" and index + 1 < len(encoded) and encoded[index + 1] in {"\\", "'"}:
+                    index += 1
+                decoded.append(encoded[index])
+                index += 1
+            value = "".join(decoded)
+        os.environ.setdefault(name, value)
 
 
 def run_once(configs: list[dict], categories: set[str] | None = None) -> int:

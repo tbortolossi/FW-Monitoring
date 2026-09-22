@@ -109,12 +109,14 @@ def check_docker():
 
 
 def check_env_file():
-    if not (PROJECT_DIR / ".env").is_file():
+    env_path = PROJECT_DIR / ".env"
+    if not env_path.is_file():
         raise SystemExit(
             "ERROR: .env is missing.\n"
             "Copy .env.example to .env and change every secret before running this script:\n"
             "  cp .env.example .env"
         )
+    env_path.chmod(0o600)
 
 
 def prepare_runtime_dirs():
@@ -716,7 +718,9 @@ def render_telegraf(firewalls, vendors):
         parts.append(render_template("inputs_paloalto_api.tmpl", context))
 
     conf_out.write_text("\n".join(parts), encoding="utf-8")
-    # The official image drops privileges before reading this bind mount.
+    # The official image drops privileges before reading this bind mount. The
+    # file is therefore world-readable, but contains environment references
+    # rather than credential values.
     conf_out.chmod(0o644)
     print("telegraf/telegraf.conf ready")
 
@@ -765,12 +769,36 @@ def load_dotenv(path):
     return values
 
 
+def compose_environment_value(value):
+    value = str(value)
+    if "\n" in value or "\r" in value or "\x00" in value:
+        raise SystemExit("ERROR: monitoring credentials cannot contain newlines or NUL bytes.")
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def snmp_runtime_environment_name(firewall, field):
+    hostname = re.sub(r"[^A-Za-z0-9]+", "_", str(firewall["hostname"])).strip("_").upper()
+    identity = f"{firewall['hostname']}\0{firewall['host']}\0{field}"
+    suffix = hashlib.sha256(identity.encode()).hexdigest()[:8].upper()
+    return f"FIREWALL_SNMP_{hostname}_{field.upper()}_{suffix}"
+
+
 def render_paloalto_api_environment(firewalls, source=None):
     source_path = Path(source or PROJECT_DIR / ".env")
     source_values = load_dotenv(source_path)
     runtime_values = {}
+    rendered_firewalls = copy.deepcopy(firewalls)
     missing = []
-    for firewall in firewalls:
+    for firewall, rendered_firewall in zip(firewalls, rendered_firewalls):
+        secret_fields = ("community",) if firewall.get("snmp_version") == 2 else ("auth_password", "priv_password")
+        for field in secret_fields:
+            value = firewall.get(field)
+            if value is None:
+                continue
+            runtime_name = snmp_runtime_environment_name(firewall, field)
+            runtime_values[runtime_name] = str(value)
+            rendered_firewall[field] = f"${runtime_name}"
+
         config = firewall.get("api_monitoring", {})
         if firewall.get("vendor") != "paloalto" or not config.get("enabled"):
             continue
@@ -790,10 +818,14 @@ def render_paloalto_api_environment(firewalls, source=None):
         raise SystemExit(
             "ERROR: missing Palo Alto API key environment variable(s) in .env: " + ", ".join(sorted(set(missing)))
         )
-    content = "".join(f"{name}={runtime_values[name]}\n" for name in sorted(runtime_values))
+    content = "".join(
+        f"{name}={compose_environment_value(runtime_values[name])}\n"
+        for name in sorted(runtime_values)
+    )
     PALOALTO_API_ENV.write_text(content, encoding="utf-8")
     PALOALTO_API_ENV.chmod(0o600)
-    print(f"telegraf/paloalto-api.env ready ({len(runtime_values)} API key(s); values hidden)")
+    print(f"telegraf/paloalto-api.env ready ({len(runtime_values)} monitoring secret(s); values hidden)")
+    return rendered_firewalls
 
 
 def start_stack():
@@ -812,7 +844,6 @@ def main():
 
     firewalls = load_inventory(PROJECT_DIR / "firewalls.yml")
     validate_inventory(firewalls)
-    render_paloalto_api_environment(firewalls)
     vendors = detect_vendors(firewalls)
 
     print("Enriching inventory automatically...")
@@ -824,7 +855,8 @@ def main():
 
     prepare_paloalto_mibs(firewalls, vendors)
     render_paloalto_api_inventory(firewalls)
-    render_telegraf(firewalls, vendors)
+    rendered_firewalls = render_paloalto_api_environment(firewalls)
+    render_telegraf(rendered_firewalls, vendors)
     start_stack()
 
 

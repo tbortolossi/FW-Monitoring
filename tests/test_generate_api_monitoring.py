@@ -152,11 +152,13 @@ class GeneratorApiValidationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with mock.patch.object(generate, "PALOALTO_API_ENV", destination):
-                generate.render_paloalto_api_environment(firewalls, source=source)
+                rendered = generate.render_paloalto_api_environment(firewalls, source=source)
             content = destination.read_text(encoding="utf-8")
             mode = stat.S_IMODE(destination.stat().st_mode)
-        self.assertEqual(content, "PALOALTO_API_KEY_PA_440=api-secret\n")
+        self.assertIn("PALOALTO_API_KEY_PA_440='api-secret'\n", content)
+        self.assertNotIn("GRAFANA_ADMIN_PASSWORD", content)
         self.assertEqual(mode, 0o600)
+        self.assertRegex(rendered[0]["community"], r"^\$FIREWALL_SNMP_PA_440_COMMUNITY_[A-F0-9]{8}$")
 
     def test_direct_key_is_copied_to_protected_runtime_environment(self):
         firewalls = inventory({"enabled": True, "api_key": "direct-secret"})
@@ -170,8 +172,26 @@ class GeneratorApiValidationTests(unittest.TestCase):
             with mock.patch.object(generate, "PALOALTO_API_ENV", destination):
                 generate.render_paloalto_api_environment(firewalls, source=source)
             content = destination.read_text(encoding="utf-8")
-        self.assertEqual(content, f"{runtime_name}=direct-secret\n")
+        self.assertIn(f"{runtime_name}='direct-secret'\n", content)
         self.assertNotIn("GRAFANA_ADMIN_PASSWORD", content)
+
+    def test_runtime_environment_protects_snmp_secrets_from_telegraf_config(self):
+        firewalls = inventory({"enabled": False})
+        firewalls[0]["community"] = "secret-$-value"
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            source = directory / ".env"
+            source.write_text("", encoding="utf-8")
+            destination = directory / "monitoring.env"
+            with mock.patch.object(generate, "PALOALTO_API_ENV", destination):
+                rendered = generate.render_paloalto_api_environment(firewalls, source=source)
+            content = destination.read_text(encoding="utf-8")
+        self.assertIn("='secret-$-value'", content)
+        self.assertNotIn("secret-$-value", rendered[0]["community"])
+
+    def test_runtime_environment_rejects_multiline_secrets(self):
+        with self.assertRaisesRegex(SystemExit, "cannot contain newlines"):
+            generate.compose_environment_value("first\nsecond")
 
 
 if __name__ == "__main__":

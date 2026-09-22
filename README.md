@@ -145,6 +145,7 @@ The project generator is Python-based:
 - `generate.py` contains the generation logic and is the main entry point.
 - `generate.sh` is only a convenience wrapper for creating `.venv`, installing dependencies, and launching `generate.py`.
 - `requirements.txt` contains the Python dependencies: `PyYAML` and `Jinja2`.
+- `requirements-dev.txt` adds the coverage and dependency-audit tools used by CI.
 
 On each run, the generator:
 
@@ -205,7 +206,7 @@ PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
     api_key: ${PALOALTO_API_KEY_PA_440}
 ```
 
-The reference must occupy the complete YAML scalar; embedded forms such as `prefix-${NAME}` are not expanded. Generation stops with the missing variable name—but never its value—when a reference cannot be resolved. Keep `.env` private (`chmod 600 .env`) and do not commit it. Direct values remain supported for backward compatibility, but environment references reduce secret duplication and are recommended for new installations.
+The reference must occupy the complete YAML scalar; embedded forms such as `prefix-${NAME}` are not expanded. Generation stops with the missing variable name—but never its value—when a reference cannot be resolved. The generator enforces mode `0600` on `.env`; do not commit it. Direct values remain supported for backward compatibility, but environment references reduce secret duplication and are recommended for new installations.
 
 Minimal Palo Alto SNMPv3:
 
@@ -355,7 +356,7 @@ The password and generated key are never printed. Existing polling settings in `
 
 ### Docker and Non-Docker Variable Handling
 
-With the normal Docker Compose workflow, no manual `export` or `docker -e` command is required. `generate.py` resolves `${VARIABLE}` references, direct `api_key` values, and the legacy `api_key_env` form. It writes only the required keys to the mode-`0600` generated file `telegraf/paloalto-api.env`, and Docker Compose injects that file into Telegraf. Other `.env` secrets, such as Grafana and InfluxDB administrator passwords, are not passed to the Telegraf container. Generated enriched inventory is mode `0600` and redacts all SNMP and API credentials.
+With the normal Docker Compose workflow, no manual `export` or `docker -e` command is required. `generate.py` resolves `${VARIABLE}` references, direct `api_key` values, and the legacy `api_key_env` form. It writes only the required API and SNMP secrets to the mode-`0600` generated file `telegraf/paloalto-api.env`; `telegraf.conf` contains environment-variable references rather than clear-text credentials. Docker Compose injects that protected file into Telegraf. Other `.env` secrets, such as Grafana and InfluxDB administrator passwords, are not passed to the Telegraf container. Generated enriched inventory is mode `0600` and redacts all SNMP and API credentials.
 
 For a one-shot diagnostic from the Linux host rather than from Docker, first generate the runtime files, then let the collector load the protected environment file itself:
 
@@ -683,6 +684,24 @@ PALO_MIB_VERSION=10-2 ./generate.sh
 ```
 
 ## Validate
+
+Every pull request and push to `main` runs GitHub Actions on Python 3.11 and 3.12. CI executes the unit tests with branch coverage, enforces a 75% project coverage floor, checks that generated dashboards are current, compiles all Python sources, validates `generate.sh` and Docker Compose, audits runtime and CI dependencies, scans tracked files for secrets and configuration problems, builds the custom Telegraf image, and scans it for high or critical vulnerabilities. The image job reports every finding and blocks on vulnerabilities with an available fix. Any temporary exception must be scoped, justified, and dated in `.trivyignore.yaml` and `SECURITY.md`. The checks also run every Monday and can be started manually.
+
+Run the same core checks locally:
+
+```bash
+.venv/bin/python -m pip install -r requirements-dev.txt
+COVERAGE_FILE=/tmp/fw-monitoring.coverage .venv/bin/python -m coverage run -m unittest discover -s tests
+COVERAGE_FILE=/tmp/fw-monitoring.coverage .venv/bin/python -m coverage report
+python3 -m py_compile generate.py paloalto_api_key.py telegraf/paloalto_api_collector.py scripts/build_paloalto_api_dashboard.py
+bash -n generate.sh
+docker compose config --quiet
+.venv/bin/pip-audit -r requirements-dev.txt
+```
+
+The coverage threshold prevents large untested regressions, but the percentage is not treated as proof of correctness. Tests prioritize inventory and secret validation, API parsing, dashboard generation, SNMP discovery behavior, and stack orchestration.
+
+The Linux distribution reported by the container scanner is independent of the Docker host. The official Telegraf image used by this project is Debian-based, so an Ubuntu host correctly produces Debian findings for that image.
 
 After startup:
 
