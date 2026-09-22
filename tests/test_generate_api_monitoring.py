@@ -155,7 +155,7 @@ class GeneratorApiValidationTests(unittest.TestCase):
                 rendered = generate.render_paloalto_api_environment(firewalls, source=source)
             content = destination.read_text(encoding="utf-8")
             mode = stat.S_IMODE(destination.stat().st_mode)
-        self.assertIn("PALOALTO_API_KEY_PA_440='api-secret'\n", content)
+        self.assertIn('PALOALTO_API_KEY_PA_440="api-secret"\n', content)
         self.assertNotIn("GRAFANA_ADMIN_PASSWORD", content)
         self.assertEqual(mode, 0o600)
         self.assertRegex(rendered[0]["community"], r"^\$FIREWALL_SNMP_PA_440_COMMUNITY_[A-F0-9]{8}$")
@@ -172,7 +172,7 @@ class GeneratorApiValidationTests(unittest.TestCase):
             with mock.patch.object(generate, "PALOALTO_API_ENV", destination):
                 generate.render_paloalto_api_environment(firewalls, source=source)
             content = destination.read_text(encoding="utf-8")
-        self.assertIn(f"{runtime_name}='direct-secret'\n", content)
+        self.assertIn(f'{runtime_name}="direct-secret"\n', content)
         self.assertNotIn("GRAFANA_ADMIN_PASSWORD", content)
 
     def test_runtime_environment_protects_snmp_secrets_from_telegraf_config(self):
@@ -186,12 +186,61 @@ class GeneratorApiValidationTests(unittest.TestCase):
             with mock.patch.object(generate, "PALOALTO_API_ENV", destination):
                 rendered = generate.render_paloalto_api_environment(firewalls, source=source)
             content = destination.read_text(encoding="utf-8")
-        self.assertIn("='secret-$-value'", content)
+        self.assertIn('="secret-\\$-value"', content)
         self.assertNotIn("secret-$-value", rendered[0]["community"])
 
     def test_runtime_environment_rejects_multiline_secrets(self):
         with self.assertRaisesRegex(SystemExit, "cannot contain newlines"):
             generate.compose_environment_value("first\nsecond")
+
+    def test_runtime_environment_error_names_field_not_value(self):
+        for bad in ("top\rsecret", "top\x00secret"):
+            with self.assertRaises(SystemExit) as raised:
+                generate.compose_environment_value(bad, "FIREWALL_SNMP_PA_COMMUNITY_ABCD1234")
+            self.assertIn("FIREWALL_SNMP_PA_COMMUNITY_ABCD1234", str(raised.exception))
+            self.assertNotIn("secret", str(raised.exception).replace("FIREWALL_SNMP", ""))
+
+    def test_compose_environment_value_escapes_only_backslash_quote_and_dollar(self):
+        expected = {
+            "plain": '"plain"',
+            "pa'ss": '"pa\'ss"',
+            'q"q': '"q\\"q"',
+            "a\\b": '"a\\\\b"',
+            "trail\\": '"trail\\\\"',
+            "d$x${HOME}": '"d\\$x\\${HOME}"',
+            "h #x = y": '"h #x = y"',
+            " lead and trail ": '" lead and trail "',
+            "": '""',
+        }
+        for value, encoded in expected.items():
+            with self.subTest(value=value):
+                self.assertEqual(generate.compose_environment_value(value), encoded)
+
+    def test_compose_environment_value_round_trips_through_compose_rules(self):
+        def compose_decode(encoded):
+            # Mirrors compose-go for double-quoted values restricted to the
+            # escapes produced by the encoder: \\ -> \, \" -> ", \$ -> $.
+            self.assertTrue(encoded.startswith('"') and encoded.endswith('"'))
+            body, output, index = encoded[1:-1], [], 0
+            while index < len(body):
+                char = body[index]
+                if char == "\\":
+                    self.assertIn(body[index + 1], {"\\", '"', "$"})
+                    output.append(body[index + 1])
+                    index += 2
+                    continue
+                self.assertNotIn(char, {'"', "$"})
+                output.append(char)
+                index += 1
+            return "".join(output)
+
+        values = [
+            "pa'ss\\word$x", 'q"q', "trail\\", "\\$x", "${HOME}$(id)`id`", "a\\nb\\t\\\"",
+            "=start=end=", "\\\\double", "$$", "'", "\\'", "#", "tab\there", "unicode-\u00e9\u20ac", "\\",
+        ]
+        for value in values:
+            with self.subTest(value=value):
+                self.assertEqual(compose_decode(generate.compose_environment_value(value)), value)
 
 
 if __name__ == "__main__":

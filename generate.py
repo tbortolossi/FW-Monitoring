@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import urllib.error
@@ -25,11 +26,6 @@ except ImportError as exc:
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-os.chdir(PROJECT_DIR)
-
-LOG_DIR = PROJECT_DIR / "logs"
-LOG_DIR.mkdir(exist_ok=True)
-LOG_FILE = LOG_DIR / f"generate-{_datetime.datetime.now():%Y%m%d-%H%M%S}.log"
 
 
 class Tee:
@@ -46,13 +42,31 @@ class Tee:
             stream.flush()
 
 
-_original_stdout = sys.stdout
-_original_stderr = sys.stderr
-_log_handle = LOG_FILE.open("a", encoding="utf-8")
-sys.stdout = Tee(_original_stdout, _log_handle)
-sys.stderr = Tee(_original_stderr, _log_handle)
+def configure_logging():
+    """Mirror stdout/stderr into logs/generate-<timestamp>.log.
 
-print(f"Logging to {LOG_FILE}")
+    Called only when generate.py runs as a script, so importing the module
+    (for example from the unit tests) has no side effects. Returns a callable
+    that restores the original streams and closes the log file.
+    """
+    os.chdir(PROJECT_DIR)
+    log_dir = PROJECT_DIR / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / f"generate-{_datetime.datetime.now():%Y%m%d-%H%M%S}.log"
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    log_handle = log_file.open("a", encoding="utf-8")
+    sys.stdout = Tee(original_stdout, log_handle)
+    sys.stderr = Tee(original_stderr, log_handle)
+    print(f"Logging to {log_file}")
+
+    def restore():
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+        log_handle.close()
+
+    return restore
+
 
 MIB_DIR = PROJECT_DIR / "telegraf" / "mibs" / "paloalto"
 ENRICHED_FIREWALLS = PROJECT_DIR / ".firewalls.generated.yml"
@@ -61,6 +75,20 @@ PALOALTO_API_ENV = PROJECT_DIR / "telegraf" / "paloalto-api.env"
 SNMP_DISCOVERY = os.environ.get("SNMP_DISCOVERY", "true").lower()
 DEFAULT_PALO_MIB_VERSION = os.environ.get("PALO_MIB_VERSION", "11-2")
 SNMP_IMAGE = ""
+GRAFANA_CONTAINER_UID = 472
+
+
+def _discovery_timeout():
+    # SNMP_DISCOVERY_TIMEOUT (seconds, integer >= 1) can be raised in the
+    # environment for slow or distant firewalls; the default is 2 seconds.
+    try:
+        return max(1, int(os.environ.get("SNMP_DISCOVERY_TIMEOUT", "2")))
+    except ValueError:
+        return 2
+
+
+SNMP_DISCOVERY_TIMEOUT = _discovery_timeout()
+SNMP_DISCOVERY_RETRIES = 1
 
 
 def run(cmd, **kwargs):
@@ -128,17 +156,51 @@ def prepare_runtime_dirs():
     telegraf_logs.mkdir(parents=True, exist_ok=True)
 
     if is_root():
-        print(f"Fixing permissions on {grafana_data} (UID 472)...")
+        print(f"Fixing permissions on {grafana_data} (UID {GRAFANA_CONTAINER_UID})...")
         for root, dirs, files in os.walk(grafana_data):
             for name in dirs + files:
-                os.chown(Path(root) / name, 472, 472)
-        os.chown(grafana_data, 472, 472)
+                os.chown(Path(root) / name, GRAFANA_CONTAINER_UID, GRAFANA_CONTAINER_UID)
+        os.chown(grafana_data, GRAFANA_CONTAINER_UID, GRAFANA_CONTAINER_UID)
     else:
-        print(f"Not running as root; allowing Grafana container UID 472 to write to {grafana_data}.")
-        grafana_data.chmod(0o777)
-    telegraf_logs.chmod(0o777)
+        ensure_container_writable(grafana_data, GRAFANA_CONTAINER_UID)
+    ensure_container_writable(telegraf_logs, None)
 
     MIB_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def container_can_write(path, uid):
+    """Return True when a container running as ``uid`` can already write to ``path``."""
+    info = os.stat(path)
+    mode = stat.S_IMODE(info.st_mode)
+    if uid is not None and info.st_uid == uid and mode & stat.S_IWUSR:
+        return True
+    if uid is not None and info.st_gid == uid and mode & stat.S_IWGRP:
+        return True
+    return bool(mode & stat.S_IWOTH and mode & stat.S_IXOTH)
+
+
+def ensure_container_writable(path, uid):
+    """Widen permissions only when the container user cannot already write.
+
+    Without root, the generator cannot chown the directory to the container
+    UID, so it falls back to mode 0777 and explains the safer alternative.
+    """
+    path = Path(path)
+    if container_can_write(path, uid):
+        return False
+    if uid is not None:
+        print(
+            f"WARNING: {path} is not owned by the container UID {uid} and this script is not running as root; "
+            f"setting mode 0777 so the container can write to it. Safer alternative: "
+            f"sudo chown -R {uid}:{uid} {path}"
+        )
+    else:
+        print(
+            f"WARNING: {path} is not writable by the container user; setting mode 0777 so the container "
+            f"can write logs to it."
+        )
+    path.chmod(0o777)
+    return True
 
 
 ENV_REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
@@ -187,6 +249,8 @@ def load_inventory(path, env_path=None):
 def save_inventory(firewalls, path):
     sanitized = copy.deepcopy(firewalls)
     for firewall in sanitized:
+        for key in [key for key in firewall if str(key).startswith("_")]:
+            del firewall[key]
         for key in SECRET_KEYS:
             if firewall.get(key):
                 firewall[key] = "<redacted>"
@@ -386,25 +450,56 @@ def validate_inventory(firewalls):
             raise SystemExit(f"ERROR: {label}: snmp_version must be 2 or 3.")
 
 
+# Private bookkeeping key listing the flags that enrich_inventory() inferred
+# itself. Keys absent from this list but present on the firewall are operator
+# overrides from firewalls.yml and are never recomputed. The key is stripped
+# from .firewalls.generated.yml by save_inventory().
+INFERRED_KEYS_FIELD = "_inferred_keys"
+
+
+def _set_inferred(firewall, key, value, keep_falsy_override=True):
+    inferred = firewall.setdefault(INFERRED_KEYS_FIELD, [])
+    if key in firewall and key not in inferred:
+        if keep_falsy_override or firewall[key]:
+            return
+    firewall[key] = value
+    if key not in inferred:
+        inferred.append(key)
+
+
 def enrich_inventory(firewalls):
+    """Infer Palo Alto feature flags from model and PAN-OS version.
+
+    Safe to call several times: main() calls it before and after SNMP
+    discovery, and flags inferred on the first pass are recomputed once
+    discovery has filled in the real model and version, while values declared
+    by the operator in firewalls.yml are always preserved.
+    """
     for firewall in firewalls:
         if normalize_vendor(firewall.get("vendor")) != "paloalto":
             continue
 
         panos_version = firewall.get("panos_version")
         if panos_version:
-            firewall.setdefault("panos_11_2_metrics", pan_at_least(panos_version, 11, 2))
-            firewall.setdefault("panos_12_metrics", pan_at_least(panos_version, 12, 1))
-            firewall.setdefault("vsys_total_cps", pan_at_least(panos_version, 12, 1))
-            firewall.setdefault("interface_utilization", pan_at_least(panos_version, 12, 1))
+            _set_inferred(firewall, "panos_10_2_metrics", pan_at_least(panos_version, 10, 2))
+            _set_inferred(firewall, "panos_11_2_metrics", pan_at_least(panos_version, 11, 2))
+            _set_inferred(firewall, "panos_12_metrics", pan_at_least(panos_version, 12, 1))
+            _set_inferred(firewall, "vsys_total_cps", pan_at_least(panos_version, 12, 1))
+            _set_inferred(firewall, "interface_utilization", pan_at_least(panos_version, 12, 1))
+
+        # Advanced flag for PA-cluster deployments (PAN-OS 11.2+ clustering).
+        # It is never inferred: set pa_cluster: true in firewalls.yml to poll
+        # the PA cluster summary objects.
+        try:
+            firewall["pa_cluster"] = normalize_boolean(firewall.get("pa_cluster"), default=False)
+        except ValueError as exc:
+            label = firewall.get("hostname") or firewall.get("host") or "firewall"
+            raise SystemExit(f"ERROR: {label}: pa_cluster must be true or false.") from exc
 
         model = firewall.get("model") or firewall.get("chassis_model") or firewall.get("hostname")
-        if "chassis" not in firewall:
-            firewall["chassis"] = is_palo_chassis(model)
-        if "pan_entity_ext" not in firewall:
-            firewall["pan_entity_ext"] = bool(firewall.get("chassis"))
-        if not firewall.get("chassis_family"):
-            firewall["chassis_family"] = chassis_family(model)
+        _set_inferred(firewall, "chassis", is_palo_chassis(model))
+        _set_inferred(firewall, "pan_entity_ext", bool(firewall.get("chassis")))
+        _set_inferred(firewall, "chassis_family", chassis_family(model), keep_falsy_override=False)
 
 
 def build_snmp_args(firewall):
@@ -436,6 +531,59 @@ def build_snmp_args(firewall):
     return ["-v2c", "-c", firewall.get("community", "public")]
 
 
+SNMP_CONF_TOKEN = re.compile(r"^[A-Za-z0-9-]+$")
+
+
+def snmp_conf_quote(value, field):
+    """Quote a value for Net-SNMP snmp.conf (parsed by copy_nword()).
+
+    Inside double quotes a backslash escapes the next character, so only
+    backslash and double quote need escaping. Line breaks and NUL bytes cannot
+    be represented and are rejected without echoing the value.
+    """
+    value = str(value)
+    if "\n" in value or "\r" in value or "\x00" in value:
+        raise SystemExit(f"ERROR: SNMP {field} cannot contain newlines or NUL bytes.")
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def snmp_conf_token(value, field):
+    value = str(value)
+    if not SNMP_CONF_TOKEN.fullmatch(value):
+        raise SystemExit(f"ERROR: unsupported SNMP {field} value.")
+    return value
+
+
+def build_snmp_conf(firewall):
+    """Return a Net-SNMP client snmp.conf holding the SNMP credentials.
+
+    The file is piped to the discovery container on stdin so that communities
+    and SNMPv3 passphrases never appear on a command line (ps, docker inspect,
+    audit logs).
+    """
+    if int(firewall.get("snmp_version", 2)) == 3:
+        lines = [
+            "defVersion 3",
+            f"defSecurityName {snmp_conf_quote(firewall.get('username', ''), 'username')}",
+            f"defAuthType {snmp_conf_token(normalize_snmp_auth(firewall.get('auth_protocol')), 'auth_protocol')}",
+            f"defAuthPassphrase {snmp_conf_quote(firewall.get('auth_password', ''), 'auth_password')}",
+        ]
+        if firewall.get("priv_password"):
+            lines[1:1] = ["defSecurityLevel authPriv"]
+            lines += [
+                f"defPrivType {snmp_conf_token(normalize_snmp_priv(firewall.get('priv_protocol')), 'priv_protocol')}",
+                f"defPrivPassphrase {snmp_conf_quote(firewall.get('priv_password'), 'priv_password')}",
+            ]
+        else:
+            lines[1:1] = ["defSecurityLevel authNoPriv"]
+    else:
+        lines = [
+            "defVersion 2c",
+            f"defCommunity {snmp_conf_quote(firewall.get('community', 'public'), 'community')}",
+        ]
+    return "\n".join(lines) + "\n"
+
+
 def ensure_snmp_image():
     global SNMP_IMAGE
     if SNMP_IMAGE:
@@ -451,27 +599,37 @@ def ensure_snmp_image():
     return bool(SNMP_IMAGE)
 
 
-def snmp_get(host, oid, snmp_args):
-    if not SNMP_IMAGE:
-        return ""
-    result = subprocess.run(
-        ["docker", "run", "--rm", SNMP_IMAGE, "snmpget", "-Oqv", "-t", "1", "-r", "1", *snmp_args, host, oid],
+# The snmp.conf is written inside the throwaway container only; the host and
+# OID are passed as positional arguments, never interpolated into the script.
+SNMP_CONF_SCRIPT = 'umask 077 && mkdir -p /tmp/snmp && cat > /tmp/snmp/snmp.conf && exec "$@"'
+
+
+def run_snmp_tool(tool, host, oid, snmp_conf):
+    return subprocess.run(
+        [
+            "docker", "run", "-i", "--rm", "-e", "SNMPCONFPATH=/tmp/snmp", SNMP_IMAGE,
+            "sh", "-c", SNMP_CONF_SCRIPT, "snmp-discovery",
+            tool, "-Oqv", "-t", str(SNMP_DISCOVERY_TIMEOUT), "-r", str(SNMP_DISCOVERY_RETRIES),
+            str(host), str(oid),
+        ],
+        input=snmp_conf,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
+
+
+def snmp_get(host, oid, snmp_conf):
+    if not SNMP_IMAGE:
+        return ""
+    result = run_snmp_tool("snmpget", host, oid, snmp_conf)
     return result.stdout.strip().strip('"')
 
 
-def snmp_walk_first(host, oid, snmp_args):
+def snmp_walk_first(host, oid, snmp_conf):
     if not SNMP_IMAGE:
         return ""
-    result = subprocess.run(
-        ["docker", "run", "--rm", SNMP_IMAGE, "snmpwalk", "-Oqv", "-t", "1", "-r", "0", *snmp_args, host, oid],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
+    result = run_snmp_tool("snmpwalk", host, oid, snmp_conf)
     first_line = result.stdout.splitlines()[0] if result.stdout.splitlines() else ""
     return first_line.strip().strip('"')
 
@@ -519,16 +677,16 @@ def discover_paloalto_devices(firewalls, vendors):
             print(f"    {hostname}: missing host, skipping discovery.")
             continue
 
-        snmp_args = build_snmp_args(firewall)
-        sys_descr = snmp_get(host, ".1.3.6.1.2.1.1.1.0", snmp_args)
+        snmp_conf = build_snmp_conf(firewall)
+        sys_descr = snmp_get(host, ".1.3.6.1.2.1.1.1.0", snmp_conf)
         if not sys_descr:
             print(f"    {hostname}: no SNMP response, keeping declared configuration.")
             continue
 
-        sys_object_id = snmp_get(host, ".1.3.6.1.2.1.1.2.0", snmp_args)
-        panos_version = snmp_get(host, ".1.3.6.1.4.1.25461.2.1.2.1.1.0", snmp_args)
-        serial = snmp_get(host, ".1.3.6.1.4.1.25461.2.1.2.1.3.0", snmp_args)
-        vsys_probe = snmp_walk_first(host, ".1.3.6.1.4.1.25461.2.1.2.3.9.1.2", snmp_args)
+        sys_object_id = snmp_get(host, ".1.3.6.1.2.1.1.2.0", snmp_conf)
+        panos_version = snmp_get(host, ".1.3.6.1.4.1.25461.2.1.2.1.1.0", snmp_conf)
+        serial = snmp_get(host, ".1.3.6.1.4.1.25461.2.1.2.1.3.0", snmp_conf)
+        vsys_probe = snmp_walk_first(host, ".1.3.6.1.4.1.25461.2.1.2.3.9.1.2", snmp_conf)
         model = detect_palo_model(sys_object_id) or detect_palo_model(sys_descr)
 
         firewall["discovered"] = True
@@ -566,16 +724,16 @@ def discover_fortinet_devices(firewalls, vendors):
             print(f"    {hostname}: missing host, skipping discovery.")
             continue
 
-        snmp_args = build_snmp_args(firewall)
-        sys_descr = snmp_get(host, ".1.3.6.1.2.1.1.1.0", snmp_args)
+        snmp_conf = build_snmp_conf(firewall)
+        sys_descr = snmp_get(host, ".1.3.6.1.2.1.1.1.0", snmp_conf)
         if not sys_descr:
             print(f"    {hostname}: no SNMP response, keeping declared configuration.")
             continue
 
-        sys_object_id = snmp_get(host, ".1.3.6.1.2.1.1.2.0", snmp_args)
-        fortios_version = snmp_get(host, ".1.3.6.1.4.1.12356.101.4.1.1.0", snmp_args)
-        serial = snmp_get(host, ".1.3.6.1.4.1.12356.100.1.1.1.0", snmp_args)
-        vdom_probe = snmp_walk_first(host, ".1.3.6.1.4.1.12356.101.3.2.1.1.2", snmp_args)
+        sys_object_id = snmp_get(host, ".1.3.6.1.2.1.1.2.0", snmp_conf)
+        fortios_version = snmp_get(host, ".1.3.6.1.4.1.12356.101.4.1.1.0", snmp_conf)
+        serial = snmp_get(host, ".1.3.6.1.4.1.12356.100.1.1.1.0", snmp_conf)
+        vdom_probe = snmp_walk_first(host, ".1.3.6.1.4.1.12356.101.3.2.1.1.2", snmp_conf)
         model = detect_fortinet_model(sys_descr)
 
         firewall["discovered"] = True
@@ -620,11 +778,14 @@ def prepare_paloalto_mibs(firewalls, vendors):
 
     for version in versions:
         dot_version = version.replace("-", ".")
-        if glob.glob(str(MIB_DIR / f"PAN-*-{dot_version}*.my")):
-            continue
-
         zip_name = f"pan-{version}-snmp-mib-modules.zip"
         zip_path = MIB_DIR / zip_name
+        # The vendor archive extracts files without a version in their names
+        # (PAN-COMMON-MIB.my, ...), so a marker records which archive was
+        # already extracted and avoids re-downloading it on every run.
+        marker = MIB_DIR / f".{zip_name}.extracted"
+        if marker.is_file() or glob.glob(str(MIB_DIR / f"PAN-*-{dot_version}*.my")):
+            continue
         urls = [
             f"https://docs.paloaltonetworks.com/content/dam/techdocs/en_US/zip/snmp-mib/{zip_name}",
             f"https://docs.paloaltonetworks.com/content/dam/techdocs/en_US/snmp-mibs/{zip_name}",
@@ -643,6 +804,7 @@ def prepare_paloalto_mibs(firewalls, vendors):
         with zipfile.ZipFile(zip_path) as archive:
             archive.extractall(MIB_DIR)
         zip_path.unlink(missing_ok=True)
+        marker.write_text(f"{zip_name}\n", encoding="utf-8")
 
     print(f"Palo Alto MIBs ready in {MIB_DIR}")
 
@@ -769,11 +931,24 @@ def load_dotenv(path):
     return values
 
 
-def compose_environment_value(value):
+def compose_environment_value(value, field="monitoring credential"):
+    """Encode a value for the Docker Compose env_file (compose-go dotenv parser).
+
+    Encoding rules (the collector's load_environment_file must mirror them):
+    the value is wrapped in double quotes, and each backslash, double quote
+    and dollar sign is prefixed with one backslash. Every other character
+    (single quotes, #, =, spaces, tabs, UTF-8) is written verbatim. This
+    round-trips exactly through Docker Compose v2 (verified empirically);
+    single quotes do not, because Compose keeps a doubled backslash literally
+    and cannot represent a trailing backslash. Line breaks and NUL bytes
+    cannot be represented and are rejected; the error names the field, never
+    the value.
+    """
     value = str(value)
     if "\n" in value or "\r" in value or "\x00" in value:
-        raise SystemExit("ERROR: monitoring credentials cannot contain newlines or NUL bytes.")
-    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+        raise SystemExit(f"ERROR: {field} cannot contain newlines or NUL bytes.")
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+    return f'"{escaped}"'
 
 
 def snmp_runtime_environment_name(firewall, field):
@@ -819,7 +994,7 @@ def render_paloalto_api_environment(firewalls, source=None):
             "ERROR: missing Palo Alto API key environment variable(s) in .env: " + ", ".join(sorted(set(missing)))
         )
     content = "".join(
-        f"{name}={compose_environment_value(runtime_values[name])}\n"
+        f"{name}={compose_environment_value(runtime_values[name], name)}\n"
         for name in sorted(runtime_values)
     )
     PALOALTO_API_ENV.write_text(content, encoding="utf-8")
@@ -861,9 +1036,8 @@ def main():
 
 
 if __name__ == "__main__":
+    _restore_logging = configure_logging()
     try:
         main()
     finally:
-        sys.stdout = _original_stdout
-        sys.stderr = _original_stderr
-        _log_handle.close()
+        _restore_logging()
