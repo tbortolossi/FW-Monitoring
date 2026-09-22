@@ -34,6 +34,9 @@ STORAGE_COMMAND = "<show><system><disk-space></disk-space></system></show>"
 THERMAL_COMMAND = "<show><system><environmentals><thermal></thermal></environmentals></system></show>"
 FAN_COMMAND = "<show><system><environmentals><fans></fans></environmentals></system></show>"
 POWER_COMMAND = "<show><system><environmentals><power></power></environmentals></system></show>"
+CHASSIS_INVENTORY_COMMAND = "<show><chassis><inventory></inventory></chassis></show>"
+CHASSIS_STATUS_COMMAND = "<show><chassis><status></status></chassis></show>"
+CHASSIS_POWER_COMMAND = "<show><chassis><power></power></chassis></show>"
 DATAPLANE_COMMAND = (
     "<show><running><resource-monitor><second><last>1</last></second>"
     "</resource-monitor></running></show>"
@@ -44,8 +47,9 @@ COUNTER_COMMAND = (
 )
 INTERFACE_COMMAND = "<show><counter><interface>all</interface></counter></show>"
 
-# Keep cardinality bounded. These are stable, high-value failure/drop counters.
-COUNTER_ALLOWLIST = {
+# Always retain these high-value counters when PAN-OS returns more active drop
+# counters than the configured cardinality limit.
+PRIORITY_COUNTERS = {
     "flow_policy_deny",
     "flow_dos_ag_max_sess_limit",
     "flow_dos_cl_max_sess_limit",
@@ -213,6 +217,23 @@ def parse_management_resources(result: ET.Element) -> dict:
         idle = re.search(r"([\d.]+)\s*%?\s*(?:id|idle)\b", cpu.group(1), re.I)
         if idle:
             fields["mp_cpu_pct"] = max(0.0, 100.0 - float(idle.group(1)))
+        iowait = re.search(r"([\d.]+)\s*%?\s*wa\b", cpu.group(1), re.I)
+        if iowait:
+            fields["cpu_iowait_pct"] = float(iowait.group(1))
+    tasks = re.search(
+        r"Tasks:\s*(\d+)\s+total,\s*(\d+)\s+running,\s*(\d+)\s+sleeping,"
+        r"\s*(\d+)\s+stopped,\s*(\d+)\s+zombie",
+        text,
+        re.I,
+    )
+    if tasks:
+        fields.update(
+            tasks_total=int(tasks.group(1)),
+            tasks_running=int(tasks.group(2)),
+            tasks_sleeping=int(tasks.group(3)),
+            tasks_stopped=int(tasks.group(4)),
+            tasks_zombie=int(tasks.group(5)),
+        )
     memory = re.search(
         r"(KiB|MiB|GiB)\s+Mem\s*:\s*([\d.]+)\s+total,\s*([\d.]+)\s+free,\s*([\d.]+)\s+used",
         text,
@@ -240,7 +261,62 @@ def parse_management_resources(result: ET.Element) -> dict:
             fields.update(memory_total_bytes=total, memory_free_bytes=free, memory_used_bytes=used)
             if total:
                 fields["memory_used_pct"] = used / total * 100.0
+    swap = re.search(
+        r"(KiB|MiB|GiB)\s+Swap\s*:\s*([\d.]+)\s+total,\s*([\d.]+)\s+free,\s*([\d.]+)\s+used",
+        text,
+        re.I,
+    )
+    if swap:
+        multiplier = {"kib": 1024, "mib": 1024**2, "gib": 1024**3}[swap.group(1).lower()]
+        total = float(swap.group(2)) * multiplier
+        free = float(swap.group(3)) * multiplier
+        used = float(swap.group(4)) * multiplier
+        fields.update(swap_total_bytes=total, swap_free_bytes=free, swap_used_bytes=used)
+        fields["swap_used_pct"] = used / total * 100.0 if total else 0.0
     return fields
+
+
+def _top_memory_bytes(value: str):
+    match = re.fullmatch(r"([\d.]+)([kmgt]?)", value.strip(), re.I)
+    if not match:
+        return None
+    number = float(match.group(1))
+    suffix = match.group(2).lower()
+    return int(number * (1024 ** ({"": 1, "k": 1, "m": 2, "g": 3, "t": 4}[suffix])))
+
+
+def parse_management_processes(result: ET.Element, limit: int = 32) -> list[tuple[dict, dict]]:
+    """Aggregate the top snapshot by process name to keep cardinality bounded."""
+    aggregated = {}
+    pattern = re.compile(
+        r"^\s*\d+\s+\S+\s+\S+\s+\S+\s+(\S+)\s+(\S+)\s+\S+\s+\S\s+"
+        r"([\d.]+)\s+([\d.]+)\s+\S+\s+(.+?)\s*$"
+    )
+    for line in _result_text(result).splitlines():
+        match = pattern.match(line)
+        if not match:
+            continue
+        virtual, resident, cpu_pct, memory_pct, command = match.groups()
+        process = command.split()[0].strip("[]")[:80]
+        if not process:
+            continue
+        fields = aggregated.setdefault(
+            process,
+            {"cpu_pct": 0.0, "memory_pct": 0.0, "processes": 0, "resident_bytes": 0},
+        )
+        fields["cpu_pct"] += float(cpu_pct)
+        fields["memory_pct"] += float(memory_pct)
+        fields["processes"] += 1
+        fields["resident_bytes"] += _top_memory_bytes(resident) or 0
+        virtual_bytes = _top_memory_bytes(virtual)
+        if virtual_bytes is not None:
+            fields["virtual_bytes"] = fields.get("virtual_bytes", 0) + virtual_bytes
+    ranked = sorted(
+        aggregated.items(),
+        key=lambda item: (item[1]["cpu_pct"], item[1]["memory_pct"], item[0]),
+        reverse=True,
+    )
+    return [({"process": process}, fields) for process, fields in ranked[:limit]]
 
 
 def parse_dataplane_resources(result: ET.Element) -> list[tuple[dict, dict]]:
@@ -301,19 +377,38 @@ def parse_dataplane_utilization(result: ET.Element) -> list[tuple[dict, dict]]:
     return points
 
 
-def parse_global_counters(result: ET.Element) -> list[tuple[dict, dict]]:
+def parse_global_counters(result: ET.Element, limit: int = 256) -> list[tuple[dict, dict]]:
     points = []
     for entry in result.iter():
         if _local_name(entry.tag).lower() != "entry":
             continue
         name_node = entry.find("name")
-        value_node = entry.find("value")
         name = (entry.attrib.get("name") or (name_node.text if name_node is not None else "") or "").strip()
         normalized = name.lower().replace("-", "_")
-        value = _number(value_node.text if value_node is not None else None)
-        if normalized in COUNTER_ALLOWLIST and value is not None:
-            points.append(({"counter": normalized}, {"value": value}))
-    return points
+        value = _number(entry.findtext("value"))
+        if not normalized or value is None or value <= 0:
+            continue
+        rate = _number(entry.findtext("rate"))
+        tags = {"counter": normalized}
+        for field in ("severity", "category", "aspect"):
+            text = (entry.findtext(field) or "").strip().lower()
+            tags[field] = text or "unknown"
+        fields = {"value": value}
+        if rate is not None:
+            fields["rate"] = rate
+        description = (entry.findtext("description") or entry.findtext("desc") or "").strip()
+        if description:
+            fields["description"] = description
+        points.append((tags, fields))
+    points.sort(
+        key=lambda point: (
+            point[0]["counter"] in PRIORITY_COUNTERS,
+            float(point[1].get("rate", 0)),
+            float(point[1]["value"]),
+        ),
+        reverse=True,
+    )
+    return points[:limit]
 
 
 def parse_interface_counters(result: ET.Element) -> list[tuple[dict, dict]]:
@@ -450,6 +545,128 @@ def parse_environmentals(result: ET.Element, sensor_type: str) -> list[tuple[dic
     return points
 
 
+def _entry_text(entry: ET.Element, *names: str) -> str:
+    wanted = {name.lower().replace("_", "-") for name in names}
+    for child in entry:
+        name = _local_name(child.tag).lower().replace("_", "-")
+        if name in wanted and child.text:
+            return child.text.strip()
+    return ""
+
+
+def _chassis_card_type(component: str) -> str:
+    normalized = component.upper()
+    if re.search(r"(?:^|-)(?:SMC|MPC)(?:-|$)", normalized):
+        return "supervisor"
+    if re.search(r"(?:^|-)(?:NPC|DPC|LFC|SFC|NC)(?:-|$)", normalized):
+        return "linecard"
+    if "FAN" in normalized:
+        return "fan"
+    if re.search(r"(?:^|-)(?:PSU|PSA|PSB)(?:-|\d|$)", normalized):
+        return "power_supply"
+    return "other"
+
+
+def parse_chassis_inventory(result: ET.Element) -> list[tuple[dict, dict]]:
+    points = []
+    entries = result.findall(".//chassis/slots/entry") or result.findall(".//slots/entry")
+    for entry in entries:
+        slot = (entry.attrib.get("name") or _entry_text(entry, "slot", "slot-id", "name")).strip()
+        component = _entry_text(entry, "component", "part-number", "model", "type", "name")
+        if not slot or not component:
+            continue
+        fields = {"component": component}
+        aliases = {
+            "serial": ("serial", "serial-number"),
+            "hardware_revision": ("hw-version", "hardware-version", "hardware-revision"),
+            "software_version": ("sw-version", "software-version"),
+            "status": ("operational-status", "card-status", "status"),
+            "config_status": ("config-status",),
+        }
+        for destination, names in aliases.items():
+            value = _entry_text(entry, *names)
+            if value:
+                fields[destination] = value
+        points.append(
+            (
+                {"slot": slot.lower(), "card_type": _chassis_card_type(component)},
+                fields,
+            )
+        )
+    return points
+
+
+def parse_chassis_status(result: ET.Element) -> list[tuple[dict, dict]]:
+    """Parse the per-slot operational state returned by ``show chassis status``."""
+    points = []
+    entries = result.findall("./status/entry") or result.findall(".//status/entry")
+    for entry in entries:
+        slot = (entry.attrib.get("name") or _entry_text(entry, "slot", "slot-id", "name")).strip()
+        component = _entry_text(entry, "component", "model", "type", "name") or "empty"
+        if not slot:
+            continue
+        fields = {}
+        aliases = {
+            "type": ("type",),
+            "status": ("status", "operational-status", "card-status"),
+            "system_role": ("sysrole", "system-role"),
+            "config": ("config",),
+            "detail": ("detail",),
+            "config_detail": ("config-detail", "config_detail"),
+        }
+        for destination, names in aliases.items():
+            value = _entry_text(entry, *names)
+            if value:
+                fields[destination] = value
+        disabled = _entry_text(entry, "disabled")
+        if disabled:
+            fields["disabled"] = disabled.lower() in {"yes", "true", "1", "disabled"}
+        if fields:
+            points.append(
+                (
+                    {"slot": slot.lower(), "card_type": _chassis_card_type(component)},
+                    {"component": component, **fields},
+                )
+            )
+    return points
+
+
+def parse_chassis_power(result: ET.Element) -> list[tuple[dict, dict]]:
+    points = []
+    for entry in result.findall(".//entry"):
+        slot = (entry.attrib.get("name") or _entry_text(entry, "slot", "name") or "chassis").strip()
+        component = _entry_text(entry, "component", "description", "model", "type") or slot
+        fields = {}
+        status = _entry_text(entry, "card-status", "status", "state")
+        if status:
+            fields["status"] = status
+        for source, destination in (
+            (("power", "watts", "power-w"), "power_w"),
+            (("provided", "provided-w"), "provided_w"),
+            (("used", "used-w"), "used_w"),
+            (("remaining", "remaining-w"), "remaining_w"),
+        ):
+            value = _number(_entry_text(entry, *source))
+            if value is not None:
+                fields[destination] = value
+        if fields:
+            points.append(({"slot": slot.lower(), "component": component[:120]}, fields))
+
+    summary = {}
+    summary_node = result.find(".//summary")
+    for source, destination in (
+        (("provided", "provided-w"), "provided_w"),
+        (("used", "used-w"), "used_w"),
+        (("remaining", "remaining-w"), "remaining_w"),
+    ):
+        value = _first_number(summary_node, *source) if summary_node is not None else None
+        if value is not None:
+            summary[destination] = value
+    if summary:
+        points.append(({"slot": "chassis", "component": "power_summary"}, summary))
+    return points
+
+
 def _escape(value: object, *, tag: bool = False) -> str:
     text = str(value).replace("\\", "\\\\").replace(" ", "\\ ").replace(",", "\\,")
     if tag:
@@ -481,7 +698,6 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
     output = []
     commands = {
         "sessions": (SESSION_COMMAND, parse_sessions, "paloalto_api_sessions"),
-        "management": (MANAGEMENT_COMMAND, parse_management_resources, "paloalto_api_management"),
         "interfaces": (INTERFACE_COMMAND, parse_interface_counters, "paloalto_api_interfaces"),
         "interface_status": (INTERFACE_STATUS_COMMAND, parse_interface_status, "paloalto_api_interfaces"),
         "ha": (HA_COMMAND, parse_ha_state, "paloalto_api_ha"),
@@ -489,10 +705,30 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
         "thermal": (THERMAL_COMMAND, lambda result: parse_environmentals(result, "thermal"), "paloalto_api_sensors"),
         "fans": (FAN_COMMAND, lambda result: parse_environmentals(result, "fan"), "paloalto_api_sensors"),
         "power": (POWER_COMMAND, lambda result: parse_environmentals(result, "power"), "paloalto_api_sensors"),
-        "counters": (COUNTER_COMMAND, parse_global_counters, "paloalto_api_counters"),
+        "counters": (
+            COUNTER_COMMAND,
+            lambda result: parse_global_counters(result, int(config.get("counter_limit", 256))),
+            "paloalto_api_counters",
+        ),
+        "chassis_inventory": (
+            CHASSIS_INVENTORY_COMMAND,
+            parse_chassis_inventory,
+            "paloalto_api_chassis_inventory",
+        ),
+        "chassis_status": (
+            CHASSIS_STATUS_COMMAND,
+            parse_chassis_status,
+            "paloalto_api_chassis_status",
+        ),
+        "chassis_power": (
+            CHASSIS_POWER_COMMAND,
+            parse_chassis_power,
+            "paloalto_api_chassis_power",
+        ),
         "system": (SYSTEM_INFO_COMMAND, parse_system_info, "paloalto_api_system"),
     }
     categories = (
+        "system",
         "sessions",
         "interfaces",
         "interface_status",
@@ -504,13 +740,23 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
         "thermal",
         "fans",
         "power",
-        "system",
+        "chassis_inventory",
+        "chassis_status",
+        "chassis_power",
     )
     for category in categories:
         if category not in due:
             continue
+        if category.startswith("chassis_") and not config.get("_is_chassis", False):
+            continue
         try:
-            if category == "dataplane":
+            if category == "management":
+                result = request_xml(config, MANAGEMENT_COMMAND)
+                parsed_sets = (
+                    ("paloalto_api_management", [({}, parse_management_resources(result))]),
+                    ("paloalto_api_processes", parse_management_processes(result)),
+                )
+            elif category == "dataplane":
                 result = request_xml(config, DATAPLANE_COMMAND)
                 parsed_sets = (
                     ("paloalto_api_dataplane_cpu", parse_dataplane_resources(result)),
@@ -519,6 +765,11 @@ def collect_firewall(config: dict, due: set[str]) -> list[str]:
             else:
                 command, parser, measurement = commands[category]
                 parsed = parser(request_xml(config, command))
+                if category == "system":
+                    model = str(parsed.get("model", ""))
+                    config["_is_chassis"] = bool(
+                        re.search(r"(^|[^0-9])(5450|7050|7080|7500)([^0-9]|$)", model)
+                    )
                 parsed_sets = ((measurement, parsed if isinstance(parsed, list) else [({}, parsed)]),)
             for measurement, points in parsed_sets:
                 for extra_tags, fields in points:
@@ -555,6 +806,8 @@ def run_once(configs: list[dict], categories: set[str] | None = None) -> int:
     selected = categories or {
         "sessions", "interfaces", "interface_status", "management", "dataplane",
         "counters", "ha", "storage", "thermal", "fans", "power", "system",
+        "chassis_inventory", "chassis_power",
+        "chassis_status",
     }
     with ThreadPoolExecutor(max_workers=max(1, min(8, len(configs)))) as executor:
         futures = [executor.submit(collect_firewall, config, selected) for config in configs]
@@ -581,6 +834,9 @@ def run_daemon(configs: list[dict]) -> int:
         "power": lambda cfg: int(cfg.get("resource_interval", 60)),
         "storage": lambda cfg: int(cfg.get("system_interval", 3600)),
         "system": lambda cfg: int(cfg.get("system_interval", 3600)),
+        "chassis_inventory": lambda cfg: int(cfg.get("system_interval", 3600)),
+        "chassis_status": lambda cfg: int(cfg.get("resource_interval", 60)),
+        "chassis_power": lambda cfg: int(cfg.get("resource_interval", 60)),
     }
     next_due = {(index, category): 0.0 for index in range(len(configs)) for category in schedules}
     while not stopped.is_set():

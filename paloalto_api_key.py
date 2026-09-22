@@ -102,7 +102,7 @@ def update_inventory(
     if api_key:
         api_config["api_key"] = api_key
     else:
-        api_config["api_key_env"] = api_key_env
+        api_config["api_key"] = f"${{{api_key_env}}}"
     firewall["api_monitoring"] = api_config
     path.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=False), encoding="utf-8")
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
@@ -121,8 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--storage",
         choices=("yaml", "env"),
-        default="yaml",
-        help="store the API key directly in firewalls.yml (default) or reference it from .env",
+        default="env",
+        help="store the API key in .env and reference it from YAML (default), or store it directly in YAML",
     )
     parser.add_argument("--insecure", action="store_true", help="disable TLS certificate verification")
     args = parser.parse_args(argv)

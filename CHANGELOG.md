@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- `${VARIABLE}` references in `firewalls.yml`, resolved from `.env` or the process environment, with environment storage now the API-key helper default.
+- Dedicated API-only Palo Alto chassis dashboard for slot inventory and live state, chassis power, environmental sensors, interfaces, and repeated per-dataplane details.
+- API management-plane swap, I/O wait, task counts, and aggregated process CPU/memory metrics.
+- Bounded collection of all active PAN-OS `severity drop` global counters with severity, category, aspect, rate, and description metadata.
+
+### Security
+
+- Generated enriched inventory now redacts SNMP and API credentials and uses mode `0600`; the API runtime key file remains mode `0600`.
+
 ## 1.1.0 - 2026-09-22
 
 ### Added

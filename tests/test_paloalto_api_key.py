@@ -41,7 +41,11 @@ class ApiKeySetupTests(unittest.TestCase):
             )
             data = yaml.safe_load(path.read_text(encoding="utf-8"))
             self.assertTrue(Path(backup).is_file())
-            self.assertEqual(data[0]["api_monitoring"]["api_key_env"], "PALOALTO_API_KEY_PA_440")
+            self.assertEqual(
+                data[0]["api_monitoring"]["api_key"],
+                "${PALOALTO_API_KEY_PA_440}",
+            )
+            self.assertNotIn("api_key_env", data[0]["api_monitoring"])
             self.assertFalse(data[0]["api_monitoring"]["verify_tls"])
 
     def test_update_inventory_can_store_key_directly(self):

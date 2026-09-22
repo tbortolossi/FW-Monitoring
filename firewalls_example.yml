@@ -17,23 +17,22 @@
   snmp_version: 3
   username: snmpv3_user
   auth_protocol: sha256
-  auth_password: CHANGE_ME_AUTH
+  auth_password: ${PA_440_SNMP_AUTH}
   priv_protocol: aes256
-  priv_password: CHANGE_ME_PRIV
-  # Optional PAN-OS XML API performance monitoring. firewalls.yml is ignored
-  # by Git, like the SNMP credentials. Run paloalto_api_key.py to generate the
-  # key and switch enabled to true.
+  priv_password: ${PA_440_SNMP_PRIV}
+  # Optional PAN-OS XML API performance monitoring. Put the key in .env and
+  # reference it below. Run paloalto_api_key.py to generate both entries.
   api_monitoring:
     enabled: false
     # Optional when the API uses a different address from the SNMP host:
     # host: 192.0.2.201
-    api_key: CHANGE_ME_PALO_ALTO_API_KEY
-    # Alternative: store the key in .env and use this instead of api_key:
-    # api_key_env: PALOALTO_API_KEY_PA_440
+    api_key: ${PALOALTO_API_KEY_PA_440}
     verify_tls: true
     interval: 20
     resource_interval: 60
     counter_interval: 60
+    # Maximum active severity=drop counter series retained per firewall.
+    counter_limit: 256
 
 - hostname: FGT-80F
   host: 192.0.2.102
@@ -41,9 +40,9 @@
   snmp_version: 3
   username: snmpv3_user
   auth_protocol: sha256
-  auth_password: CHANGE_ME_AUTH
+  auth_password: ${FGT_80F_SNMP_AUTH}
   priv_protocol: aes256
-  priv_password: CHANGE_ME_PRIV
+  priv_password: ${FGT_80F_SNMP_PRIV}
 
 #####################################################
 ## SNMPv2c examples
@@ -53,10 +52,10 @@
 #  host: 192.0.2.101
 #  vendor: paloalto
 #  snmp_version: 2
-#  community: CHANGE_ME
+#  community: ${PA_440_SNMP_COMMUNITY}
 #
 #- hostname: FGT-80F
 #  host: 192.0.2.102
 #  vendor: fortinet
 #  snmp_version: 2
-#  community: CHANGE_ME
+#  community: ${FGT_80F_SNMP_COMMUNITY}
