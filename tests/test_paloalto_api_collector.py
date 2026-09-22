@@ -252,9 +252,13 @@ class CollectorParsingTests(unittest.TestCase):
             [
                 (
                     {"sensor_type": "thermal", "slot": "1", "description": "CPU"},
-                    {"degrees_c": 42, "min": 5, "max": 90, "alarm": "False"},
+                    {"degrees_c": 42.0, "min": 5, "max": 90, "alarm": "False"},
                 )
             ],
+        )
+        self.assertIsInstance(
+            parse_environmentals(result, "thermal")[0][1]["degrees_c"],
+            float,
         )
 
     def test_chassis_inventory_exposes_slots_and_card_types(self):
@@ -367,10 +371,10 @@ class CollectorParsingTests(unittest.TestCase):
     def test_generated_environment_file_can_be_loaded_for_host_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "api.env"
-            path.write_text("# generated\nPALO_KEY=secret-value\n", encoding="utf-8")
+            path.write_text("# generated\nPALO_KEY='secret-\\\\value\\'s'\n", encoding="utf-8")
             with mock.patch.dict(os.environ, {}, clear=True):
                 load_environment_file(path)
-                self.assertEqual(os.environ["PALO_KEY"], "secret-value")
+                self.assertEqual(os.environ["PALO_KEY"], "secret-\\value's")
 
 
 if __name__ == "__main__":

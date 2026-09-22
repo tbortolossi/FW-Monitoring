@@ -4,15 +4,24 @@
 
 ### Added
 
+- GitHub Actions CI for Python 3.11/3.12 tests, 75% branch-coverage enforcement, generated-dashboard drift detection, Compose validation, dependency auditing, repository secret/misconfiguration scanning, container builds, full image vulnerability reporting, and blocking of fixable high/critical findings.
+- Unit coverage for generator validation, normalization, SNMP discovery, rendering, and stack orchestration, plus Dependabot update configuration.
 - `${VARIABLE}` references in `firewalls.yml`, resolved from `.env` or the process environment, with environment storage now the API-key helper default.
 - Interactive Palo Alto inventory selection in the API-key helper, with automatic reuse of declared API hosts and preservation of existing polling settings.
 - Dedicated API-only Palo Alto chassis dashboard for slot inventory and live state, chassis power, environmental sensors, interfaces, and repeated per-dataplane details.
 - API management-plane swap, I/O wait, task counts, and aggregated process CPU/memory metrics.
 - Bounded collection of all active PAN-OS `severity drop` global counters with severity, category, aspect, rate, and description metadata.
 
+### Fixed
+
+- API environmental sensor values now always use floating-point fields, preventing InfluxDB integer/float type conflicts when PAN-OS changes numeric formatting between polls.
+
 ### Security
 
-- Generated enriched inventory now redacts SNMP and API credentials and uses mode `0600`; the API runtime key file remains mode `0600`.
+- Updated the custom collector base image from Telegraf 1.32 to 1.40.1 so CI can gate current OS and Go dependency vulnerabilities.
+- Generated enriched inventory now redacts SNMP and API credentials and uses mode `0600`; the protected Telegraf runtime environment contains only required monitoring secrets, generated `telegraf.conf` no longer contains clear-text SNMP credentials, and `.env` is automatically restricted to mode `0600`.
+- Added a security policy and a scoped, expiring risk acceptance for the gRPC-Go denial-of-service finding embedded in the latest Telegraf release; the shipped stack exposes no gRPC listener.
+- The custom Telegraf image now declares its unprivileged runtime user explicitly and no longer installs the unnecessary `nano` package.
 
 ## 1.1.0 - 2026-09-22
 

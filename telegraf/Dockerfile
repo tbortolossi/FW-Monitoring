@@ -1,12 +1,12 @@
-FROM telegraf:1.32
+FROM telegraf:1.40.1
 
 # 1) Enable non-free repositories for snmp-mibs-downloader.
 RUN echo "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] \
-     http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware" \
+     http://deb.debian.org/debian bookworm contrib non-free non-free-firmware" \
      > /etc/apt/sources.list.d/nonfree.list && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates python3 snmp snmp-mibs-downloader nano && \
+        ca-certificates python3 snmp snmp-mibs-downloader && \
     download-mibs && \
     # 2) Allow Net-SNMP to load all discovered MIBs.
     sed -i 's/^mibs *:/# &/' /etc/snmp/snmp.conf && \
@@ -36,3 +36,7 @@ MIBS=+ALL
 
 # Read-only PAN-OS XML API performance collector used by inputs.execd.
 COPY paloalto_api_collector.py /usr/local/bin/paloalto_api_collector.py
+
+# Make the runtime privilege boundary explicit instead of relying only on the
+# upstream entrypoint to drop from root to the Telegraf account.
+USER telegraf

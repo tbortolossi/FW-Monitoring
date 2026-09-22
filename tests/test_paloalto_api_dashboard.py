@@ -2,6 +2,8 @@ import json
 import unittest
 from pathlib import Path
 
+from scripts.build_paloalto_api_dashboard import build_chassis_dashboard, build_dashboard
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "grafana/provisioning/dashboards/Palo_API_Dashboard.json"
@@ -51,6 +53,10 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
     def test_datasource_uid_is_stable(self):
         serialized = json.dumps(self.dashboard)
         self.assertIn("P951FEA4DE68E13C5", serialized)
+
+    def test_provisioned_dashboards_match_the_builder(self):
+        self.assertEqual(self.dashboard, build_dashboard())
+        self.assertEqual(self.chassis_dashboard, build_chassis_dashboard())
 
     def test_chassis_dashboard_has_dedicated_inventory_and_power_sections(self):
         self.assertEqual(self.chassis_dashboard["uid"], "paloalto-api-chassis")
