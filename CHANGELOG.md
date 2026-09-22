@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - 2026-09-22
 
 Behavior changes to review before upgrading (see "Upgrade from v1.0.2" and "Upgrade from v1.1.0" in `README.md`):
 
