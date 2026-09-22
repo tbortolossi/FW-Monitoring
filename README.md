@@ -27,8 +27,10 @@ The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB 
 
 - [Install or regenerate the stack](#quick-start)
 - [Open Grafana and view a dashboard](#open-grafana-and-view-dashboards)
+- [Write `firewalls.yml` step by step](#write-firewallsyml-step-by-step)
 - [Declare firewalls and their options](#firewall-inventory)
 - [Configure Palo Alto XML API monitoring](#palo-alto-xml-api-setup)
+- [Generate a Palo Alto API key and choose where it is stored](#generate-a-key-with-paloalto_api_keypy)
 - [Upgrade from v1.0.2 (SNMP-only, May 2026)](#upgrade-from-v102-snmp-only-may-2026)
 - [Upgrade from v1.1.0](#upgrade-from-v110)
 - [Upgrade any other installation](#upgrade-an-existing-installation)
@@ -64,9 +66,9 @@ Palo Alto MIB files are downloaded by the generator when needed and are ignored 
    nano firewalls.yml
    ```
 
-   Declare each firewall with a hostname, management IP, vendor, and SNMP settings. Reference secrets as `${VARIABLE}` values defined in `.env`; see [Firewall Inventory](#firewall-inventory).
+   Declare each firewall with a hostname, management IP, vendor, and SNMP settings. Reference secrets as `${VARIABLE}` values defined in `.env`; see [Write `firewalls.yml` Step by Step](#write-firewallsyml-step-by-step) and the key reference in [Firewall Inventory](#firewall-inventory).
 
-3. Configure SNMP on the firewalls ([Palo Alto](#palo-alto-snmp-setup), [Fortinet](#fortinet-snmp-setup)). For Palo Alto API monitoring, also follow [Palo Alto XML API Setup](#palo-alto-xml-api-setup).
+3. Configure SNMP on the firewalls ([Palo Alto](#palo-alto-snmp-setup), [Fortinet](#fortinet-snmp-setup)). For Palo Alto API monitoring, also follow [Palo Alto XML API Setup](#palo-alto-xml-api-setup): after the first `./generate.sh`, `paloalto_api_key.py` generates the key and writes it to `.env` (or to `firewalls.yml` with `--storage yaml`).
 
 4. Generate the configuration and start the stack:
 
@@ -173,11 +175,61 @@ sudo chown -R 472:472 grafana-data
 
 ## Firewall Inventory
 
-`firewalls.yml` is intentionally simple. In normal use, declare only the hostname, management IP, vendor, SNMP version, and SNMP credentials. Do not declare PAN-OS or FortiOS versions manually: the generator polls SNMP first and records the discovered version, model, and feature flags in the ignored `.firewalls.generated.yml`.
+`firewalls.yml` is the only file you write to describe the firewalls. It is a YAML **list**: one entry per firewall, each entry starting with `- hostname:`. `generate.py` reads it, resolves the secrets, discovers the rest over SNMP, and renders the Telegraf configuration from it.
+
+Keep it minimal. In normal use an entry needs only five things: the hostname, the management IP, the vendor, the SNMP version, and the SNMP credentials. Do not declare PAN-OS or FortiOS versions, models, or chassis flags by hand: the generator polls SNMP first and records the discovered values in the ignored `.firewalls.generated.yml`.
 
 `firewalls.yml` is ignored by Git because it usually contains real firewall IPs. Commit changes to `firewalls_example.yml` when you want to improve the sample inventory.
 
-Use the firewall's own configured hostname (its SNMP `sysName`) as `hostname`. The SNMP dashboards take the **hostname** selector value from `sysName`, while the API dashboards use the inventory `hostname`; matching them keeps both views on the same name.
+### Write `firewalls.yml` Step by Step
+
+1. Start from the committed sample:
+
+   ```bash
+   cp firewalls_example.yml firewalls.yml
+   ```
+
+2. Keep one block per firewall and delete the sample entries you do not need. A minimal Palo Alto entry with SNMPv2c looks like this:
+
+   ```yaml
+   - hostname: PA-440
+     host: 192.0.2.101
+     vendor: paloalto
+     snmp_version: 2
+     community: ${PA_440_SNMP_COMMUNITY}
+   ```
+
+   The same firewall with SNMPv3:
+
+   ```yaml
+   - hostname: PA-440
+     host: 192.0.2.101
+     vendor: paloalto
+     snmp_version: 3
+     username: fwmon
+     auth_protocol: sha256
+     auth_password: ${PA_440_SNMP_AUTH}
+     priv_protocol: aes256
+     priv_password: ${PA_440_SNMP_PRIV}
+   ```
+
+   A Fortinet entry uses the same keys with `vendor: fortinet`.
+
+3. Use the firewall's own configured hostname (its SNMP `sysName`) as `hostname`. The SNMP dashboards take the **hostname** selector value from `sysName`, while the API dashboards use the inventory `hostname`; matching them keeps both views on the same name. Hostnames must be unique.
+
+4. Put every secret in `.env` and reference it from the YAML as `${VARIABLE_NAME}` (next section). The variable names are free; `PA_440_SNMP_AUTH` is only a convention.
+
+5. For a Palo Alto firewall that should also be polled over the XML API, add an `api_monitoring` block. The easiest way is to let `paloalto_api_key.py` write it for you (see [Generate a Key with `paloalto_api_key.py`](#generate-a-key-with-paloalto_api_keypy)); the block can also be written by hand:
+
+   ```yaml
+     api_monitoring:
+       enabled: true
+       api_key: ${PALOALTO_API_KEY_PA_440}
+   ```
+
+6. Run `./generate.sh`. The generator stops with an explicit error when an entry is invalid (unknown vendor, missing `hostname` or `host`, missing community or SNMPv3 passphrase, unresolved `${VARIABLE}`) and never prints a secret value.
+
+Indentation matters in YAML: the keys of an entry are indented two spaces under the `-`, and the keys of `api_monitoring` two more. Quote a value only when it contains YAML-special characters such as `:` or `#`.
 
 ### Reference Secrets from `.env`
 
@@ -205,6 +257,8 @@ PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
 ```
 
 The reference must occupy the complete YAML scalar; embedded forms such as `prefix-${NAME}` are not expanded. Generation stops with the missing variable name, never its value, when a reference cannot be resolved or is empty. The generator enforces mode `0600` on `.env`; do not commit it. Direct values in `firewalls.yml` remain supported for backward compatibility, but environment references are recommended.
+
+Docker Compose also reads `.env` and expands `$` in unquoted values. Wrap a secret that contains `$` in single quotes there, for example `NAME='abc$def'`.
 
 ### Supported Keys
 
@@ -342,7 +396,15 @@ API monitoring is optional and Palo Alto-only. Its dedicated dashboards are API-
 
 Create a dedicated PAN-OS administrator with a custom role that grants only XML API **Operational Requests** access. Avoid using a full superuser account for ongoing collection.
 
-### Store the API Key in `.env` (Recommended)
+### Where the API Key Lives
+
+`firewalls.yml` accepts the key in three forms. Set exactly one of `api_key` or `api_key_env` per enabled firewall:
+
+| Form | YAML | Notes |
+| --- | --- | --- |
+| `.env` reference (recommended) | `api_key: ${PALOALTO_API_KEY_PA_440}` | Written by `paloalto_api_key.py` with the default `--storage env`. |
+| Direct value | `api_key: <key>` | Written by `paloalto_api_key.py --storage yaml`. `firewalls.yml` is ignored by Git and set to mode `0600`, but the key is readable in the file. |
+| Legacy variable name | `api_key_env: PALOALTO_API_KEY_PA_440` | Older syntax naming the `.env` variable; still supported. |
 
 The recommended layout keeps the key in `.env` and only a variable reference in `firewalls.yml`:
 
@@ -371,16 +433,7 @@ PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
     system_interval: 3600
 ```
 
-Never put a real key in `firewalls_example.yml`, a commit, a ticket, or a shared log. The earlier `api_key_env` syntax remains supported:
-
-```yaml
-  api_monitoring:
-    enabled: true
-    api_key_env: PALOALTO_API_KEY_PA_440
-    verify_tls: true
-```
-
-Set exactly one of `api_key` or `api_key_env` for each enabled firewall.
+Never put a real key in `firewalls_example.yml`, a commit, a ticket, or a shared log.
 
 By default, API polling uses the firewall-level `host`, which is also used for SNMP. If the same firewall is reached through different addresses for SNMP and HTTPS, keep the SNMP address at the top level and set the API address inside `api_monitoring`:
 
@@ -398,7 +451,7 @@ By default, API polling uses the firewall-level `host`, which is also used for S
 
 ### Generate a Key with `paloalto_api_key.py`
 
-The helper reads `firewalls.yml`, lists the declared Palo Alto firewalls, and asks for the API username and password. It uses the declared `host` (or the existing `api_monitoring.host`) automatically. Run it after `./generate.sh` has created `.venv`:
+`paloalto_api_key.py` does three things: it asks PAN-OS for an API key with the administrator's username and password, it stores that key where you tell it to (`.env` by default, or directly in `firewalls.yml`), and it writes the matching `api_monitoring` block into the selected `firewalls.yml` entry. You never have to copy a key by hand. Run it after `./generate.sh` has created `.venv`, from the project directory:
 
 ```bash
 .venv/bin/python paloalto_api_key.py
@@ -412,30 +465,69 @@ Select a firewall [1-2]: 1
 API username: fwmon-api
 API password:
 API key stored in .env as PALOALTO_API_KEY_PA_440 (mode 0600).
+API monitoring enabled in firewalls.yml; original inventory backup: firewalls.yml.bak.
+The API key and password were not printed.
 ```
 
-With the default `--storage env`, the helper:
+#### How It Works
 
-1. appends (or replaces) this line in `.env`, where the name is `PALOALTO_API_KEY_` followed by the hostname in upper case with every other character turned into `_`:
+1. **Read the inventory.** The helper loads `firewalls.yml` (or the file given with `--inventory`), keeps the Palo Alto entries, and shows them in a numbered menu with the address it will call and whether API monitoring is already enabled. Pass `--hostname` to skip the menu.
+2. **Pick the API address.** It calls the address already declared for the entry: `api_monitoring.host` when present, otherwise the top-level `host`. Pass `--host` together with `--hostname` to use another address; the helper then records it as `api_monitoring.host` so the SNMP address stays untouched.
+3. **Ask PAN-OS for the key.** It prompts for the username (unless `--username` is given) and always prompts for the password, then sends a `type=keygen` request to `https://<host>:<port>/api/`. TLS certificates are verified unless `--insecure` is passed. Any PAN-OS error is printed and nothing is written.
+4. **Store the key** according to `--storage` (next section).
+5. **Update `firewalls.yml`.** It writes or updates the `api_monitoring` block of the selected entry: `enabled: true`, `port`, `verify_tls`, the key (or its reference), and `host` when it differs from the SNMP address. Polling settings already present in the block (`interval`, `resource_interval`, `counter_interval`, `counter_limit`, ...) are kept; any previous `api_key` or `api_key_env` is replaced.
+6. **Protect the files.** `firewalls.yml` and `.env` are set to mode `0600`. Before its first rewrite, the helper copies the original inventory to `firewalls.yml.bak`; later runs never overwrite that backup.
 
-   ```dotenv
-   # Palo Alto XML API monitoring key.
-   PALOALTO_API_KEY_PA_440=<generated key>
-   ```
+The helper rewrites `firewalls.yml` as plain YAML, so comments in that file are not kept; restore them from `firewalls.yml.bak` if you need them. The password and the key are never printed.
 
-2. writes or updates the `api_monitoring` block of the selected entry, keeping any polling settings already there:
+#### Choose Where the Key Is Written
 
-   ```yaml
-     api_monitoring:
-       enabled: true
-       port: 443
-       verify_tls: true
-       api_key: ${PALOALTO_API_KEY_PA_440}
-   ```
+The `--storage` option decides where the key itself ends up. Both modes produce a `firewalls.yml` that `generate.py` accepts.
 
-3. sets both files to mode `0600`.
+| Mode | Where the key lives | What `firewalls.yml` contains | When to use |
+| --- | --- | --- | --- |
+| `--storage env` (default) | `.env`, as `PALOALTO_API_KEY_<HOSTNAME>=<key>` | `api_key: ${PALOALTO_API_KEY_<HOSTNAME>}` | Recommended: the inventory can be shared or reviewed without exposing the key. |
+| `--storage yaml` | `firewalls.yml` itself | `api_key: <key>` | Backward compatibility, or a lab where `.env` is not used for firewall secrets. |
 
-The helper rewrites `firewalls.yml` as plain YAML, so comments in that file are not kept. Before its first rewrite it saves the original as `firewalls.yml.bak`; later runs never overwrite that backup. The password and the key are never printed.
+The variable name is `PALOALTO_API_KEY_` followed by the hostname in upper case, with every run of characters other than letters and digits turned into a single `_` (`LYON-PA-01` gives `PALOALTO_API_KEY_LYON_PA_01`). Hostnames that differ only by punctuation or case would map to the same variable name, so keep them distinct.
+
+With the default `--storage env`, `.env` receives (or updates) this line:
+
+```dotenv
+# Palo Alto XML API monitoring key.
+PALOALTO_API_KEY_PA_440=<generated key>
+```
+
+and the inventory entry becomes:
+
+```yaml
+- hostname: PA-440
+  host: 192.0.2.101
+  vendor: paloalto
+  snmp_version: 3
+  username: fwmon
+  auth_protocol: sha256
+  auth_password: ${PA_440_SNMP_AUTH}
+  priv_protocol: aes256
+  priv_password: ${PA_440_SNMP_PRIV}
+  api_monitoring:
+    enabled: true
+    port: 443
+    verify_tls: true
+    api_key: ${PALOALTO_API_KEY_PA_440}
+```
+
+With `--storage yaml`, `.env` is not touched and the key is written directly:
+
+```yaml
+  api_monitoring:
+    enabled: true
+    port: 443
+    verify_tls: true
+    api_key: <generated key>
+```
+
+Switching from one mode to the other later is just a matter of running the helper again with the other `--storage` value: the previous `api_key` line is replaced. A key left in `.env` after moving to `--storage yaml` is harmless but can be deleted.
 
 Then apply the change:
 
@@ -443,14 +535,19 @@ Then apply the change:
 ./generate.sh
 ```
 
-Useful options:
+#### Options
 
-- `--hostname PA-440` selects the entry without the menu (for scripts).
-- `--host api-pa.example.test` supplies or replaces a distinct API address.
-- `--username fwmon-api` skips the username prompt; the password is always prompted.
-- `--port 8443` uses another HTTPS port.
-- `--insecure` disables certificate verification for a lab with a self-signed certificate and writes `verify_tls: false`. `verify_tls: true` is the secure default: install a trusted firewall certificate or trust its issuing CA.
-- `--storage yaml` stores the key directly in `firewalls.yml` instead of `.env` (backward compatibility only).
+| Option | Default | Effect |
+| --- | --- | --- |
+| `--hostname NAME` | menu | Select the inventory entry non-interactively (for scripts). |
+| `--host ADDRESS` | declared address | API IP or DNS name; combine with `--hostname`. Written as `api_monitoring.host` when it differs from the SNMP `host`. |
+| `--username USER` | prompt | PAN-OS API username. The password is always prompted. |
+| `--port PORT` | `443` | HTTPS port, written as `api_monitoring.port`. |
+| `--timeout SECONDS` | `15` | Timeout of the key generation request. |
+| `--insecure` | off | Disable certificate verification and write `verify_tls: false`. Only for a lab with a self-signed certificate; the secure default is to install a trusted certificate or trust its issuing CA. |
+| `--storage env\|yaml` | `env` | Where the key is stored (see above). |
+| `--inventory PATH` | `firewalls.yml` | Alternate inventory file. |
+| `--env-file PATH` | `.env` | Alternate secrets file for `--storage env`. |
 
 For several firewalls, run the helper once per firewall, then regenerate once:
 
@@ -461,7 +558,7 @@ done
 ./generate.sh
 ```
 
-Each firewall gets its own `PALOALTO_API_KEY_<HOSTNAME>` line in `.env` and its own reference in `firewalls.yml`. Hostnames must be unique; two hostnames that differ only by punctuation or case would map to the same variable name.
+Each firewall gets its own `PALOALTO_API_KEY_<HOSTNAME>` line in `.env` and its own reference in `firewalls.yml`.
 
 ### Docker and Non-Docker Variable Handling
 
