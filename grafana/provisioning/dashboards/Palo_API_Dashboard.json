@@ -157,7 +157,7 @@
       "id": 3001,
       "options": {
         "colorMode": "background",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
@@ -176,7 +176,7 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: -15m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> last()\n  |> group()\n  |> max()\n  |> map(fn: (r) => ({ _time: now(), _field: \"DP CPU\", _value: float(v: r._value) }))",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: -30m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> max()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ _time: r._time, _field: \"DP CPU\", _value: float(v: r._value) }))",
           "refId": "A"
         }
       ],
@@ -226,7 +226,7 @@
       "id": 3002,
       "options": {
         "colorMode": "background",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
@@ -245,13 +245,13 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: -15m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core != \"average\")\n  |> last()\n  |> group()\n  |> max()\n  |> map(fn: (r) => ({ _time: now(), _field: \"Hottest core\", _value: float(v: r._value) }))",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: -30m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field =~ /^cpu_(max_)?pct$/ and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> max()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Hottest core\", _value: float(v: r._value) }))",
           "refId": "A"
         }
       ],
       "title": "Hottest DP Core",
       "type": "stat",
-      "description": "Busiest individual dataplane core. A high value with a lower average reveals imbalance or saturated cores hidden by the average."
+      "description": "Busiest individual dataplane core. Uses the per-core peak within each minute (cpu_max_pct) when the collector provides it and falls back to the per-core one-minute average (cpu_pct): both fields are merged and the highest value per minute wins. A high value with a lower average reveals imbalance or saturated cores hidden by the average."
     },
     {
       "datasource": {
@@ -295,7 +295,7 @@
       "id": 3003,
       "options": {
         "colorMode": "background",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
@@ -314,7 +314,7 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: -15m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"mp_cpu_pct\")\n  |> last()\n  |> group()\n  |> max()\n  |> map(fn: (r) => ({ _time: now(), _field: \"MP CPU\", _value: float(v: r._value) }))",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: -30m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"mp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> max()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ _time: r._time, _field: \"MP CPU\", _value: float(v: r._value) }))",
           "refId": "A"
         }
       ],
@@ -364,7 +364,7 @@
       "id": 3004,
       "options": {
         "colorMode": "background",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
@@ -383,7 +383,7 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: -15m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"memory_used_pct\")\n  |> last()\n  |> group()\n  |> max()\n  |> map(fn: (r) => ({ _time: now(), _field: \"MP RAM\", _value: float(v: r._value) }))",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: -30m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"memory_used_pct\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> max()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ _time: r._time, _field: \"MP RAM\", _value: float(v: r._value) }))",
           "refId": "A"
         }
       ],
@@ -424,7 +424,7 @@
       "id": 3005,
       "options": {
         "colorMode": "none",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
@@ -443,7 +443,7 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: -15m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"sessions_active\")\n  |> last()\n  |> group()\n  |> max()\n  |> map(fn: (r) => ({ _time: now(), _field: \"Sessions\", _value: float(v: r._value) }))",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: -30m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"sessions_active\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> max()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Sessions\", _value: float(v: r._value) }))",
           "refId": "A"
         }
       ],
@@ -493,7 +493,7 @@
       "id": 3006,
       "options": {
         "colorMode": "background",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
@@ -512,7 +512,7 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: -15m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"session_utilization_pct\")\n  |> last()\n  |> group()\n  |> max()\n  |> map(fn: (r) => ({ _time: now(), _field: \"Session table\", _value: float(v: r._value) }))",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: -30m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"session_utilization_pct\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> max()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Session table\", _value: float(v: r._value) }))",
           "refId": "A"
         }
       ],
@@ -553,7 +553,7 @@
       "id": 3007,
       "options": {
         "colorMode": "none",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
@@ -572,7 +572,7 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: -15m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"cps\")\n  |> last()\n  |> group()\n  |> max()\n  |> map(fn: (r) => ({ _time: now(), _field: \"CPS\", _value: float(v: r._value) }))",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: -30m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"cps\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> max()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ _time: r._time, _field: \"CPS\", _value: float(v: r._value) }))",
           "refId": "A"
         }
       ],
@@ -613,7 +613,7 @@
       "id": 3008,
       "options": {
         "colorMode": "none",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
@@ -632,13 +632,13 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field =~ /^(in|out)_octets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> last()\n  |> group()\n  |> sum()\n  |> map(fn: (r) => ({ _time: now(), _field: \"Throughput\", _value: r._value * 8.0 }))",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: -30m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field =~ /^(in|out)_octets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Throughput\", _value: r._value * 8.0 }))",
           "refId": "A"
         }
       ],
       "title": "Throughput (In + Out)",
       "type": "stat",
-      "description": "Sum of physical Ethernet In and Out rates from hardware octet counters."
+      "description": "Sum of physical Ethernet In and Out rates from hardware octet counters, with a 30-minute sparkline."
     },
     {
       "datasource": {
@@ -654,10 +654,30 @@
             "lineWidth": 1,
             "fillOpacity": 8,
             "spanNulls": false,
-            "showPoints": "never"
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
           },
           "min": 0,
-          "max": 100
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -690,13 +710,13 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "management = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"mp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Management plane\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\naverages = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane + \" average\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane + \" hottest core\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\nunion(tables: [management, averages, hottest])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+          "query": "management = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"mp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Management plane\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\naverages = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane + \" average\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane + \" hottest core\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\npeaks = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_max_pct\" and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane + \" hottest core (peak)\", _value: float(v: r._value) }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\nunion(tables: [management, averages, hottest, peaks])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
           "refId": "A"
         }
       ],
       "title": "CPU MP / DP",
       "type": "timeseries",
-      "description": "Management-plane CPU, the all-core average of every dataplane (equivalent to SNMP) and the busiest core of every dataplane. Per-core curves are in the repeated Dataplane rows."
+      "description": "Management-plane CPU, the all-core average of every dataplane (equivalent to SNMP), the busiest core of every dataplane (one-minute average) and its peak within the minute. Dashed lines mark 70% and 90%. Per-core curves are in the repeated Dataplane rows."
     },
     {
       "datasource": {
@@ -712,10 +732,30 @@
             "lineWidth": 1,
             "fillOpacity": 8,
             "spanNulls": false,
-            "showPoints": "never"
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
           },
           "min": 0,
-          "max": 100
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 85
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -882,10 +922,30 @@
             "lineWidth": 1,
             "fillOpacity": 8,
             "spanNulls": false,
-            "showPoints": "never"
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
           },
           "min": 0,
-          "max": 100
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -1245,16 +1305,36 @@
             "lineWidth": 1,
             "fillOpacity": 8,
             "spanNulls": false,
-            "showPoints": "never"
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
           },
           "min": 0,
-          "max": 100
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 35
       },
@@ -1296,22 +1376,104 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "pps",
+          "unit": "percent",
           "custom": {
             "drawStyle": "line",
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "fillOpacity": 8,
             "spanNulls": false,
-            "showPoints": "never"
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
           }
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
+        "y": 35
+      },
+      "id": 3013,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_ingress_backlogs\" and r.hostname == \"${hostname}\" and r._field == \"usage_pct\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane, _value: float(v: r._value) }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "Ingress Backlog by Dataplane",
+      "type": "timeseries",
+      "description": "Packet-processing ingress queue usage per dataplane from show running resource-monitor ingress-backlogs. 0% means no backlog; a sustained backlog means the dataplane cannot keep up and precedes buffer exhaustion and drops. Dashed lines mark 50% and 80%."
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 25,
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
         "y": 35
       },
       "id": 3012,
@@ -1343,7 +1505,7 @@
       ],
       "title": "Global Drop Rate by Category",
       "type": "timeseries",
-      "description": "Packets dropped per second by the dataplane, summed by PAN-OS counter category. Details are in the drop counter sections."
+      "description": "Packets dropped per second by the dataplane, stacked by PAN-OS counter category so the total drop rate is the top of the stack. Details are in the drop counter sections."
     },
     {
       "collapsed": true,
@@ -1457,7 +1619,92 @@
                 }
               }
             },
-            "overrides": []
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "enabled"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "HA enabled"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "mode"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Mode"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "state"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Local state"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "peer_state"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Peer state"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "peer_connection"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Peer connection"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "config_sync"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Config sync"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "state_sync"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Session sync"
+                  }
+                ]
+              }
+            ]
           },
           "gridPos": {
             "h": 4,
@@ -1479,13 +1726,166 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_ha\" and r.hostname == \"${hostname}\")\n  |> last()\n  |> map(fn: (r) => ({ _field: r._field, _value: string(v: r._value), row: \"HA\" }))\n  |> group()\n  |> pivot(rowKey: [\"row\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"row\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_ha\" and r.hostname == \"${hostname}\" and r._field !~ /^(ha1_status|ha2_status|link_monitoring|path_monitoring|state_reason|state_duration|local_priority|peer_priority|preemptive)$/)\n  |> last()\n  |> map(fn: (r) => ({ _field: r._field, _value: string(v: r._value), row: \"HA\" }))\n  |> group()\n  |> pivot(rowKey: [\"row\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"row\"])",
               "refId": "A"
             }
           ],
           "title": "HA Synchronization",
           "type": "table",
-          "description": "Local and peer state, peer connection, running-configuration and session-state synchronization from show high-availability state."
+          "description": "Local and peer state, peer connection, running-configuration and session-state synchronization from show high-availability state. Every other HA field the collector adds appears here automatically."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                }
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "ha1_status"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "HA1 link"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "ha2_status"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "HA2 link"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "link_monitoring"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Link monitoring"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "path_monitoring"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Path monitoring"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "state_reason"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "State reason"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "state_duration"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "In state since"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "local_priority"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Local priority"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "peer_priority"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Peer priority"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "preemptive"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Preemptive"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 24,
+            "x": 0,
+            "y": 54
+          },
+          "id": 1008,
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_ha\" and r.hostname == \"${hostname}\" and r._field =~ /^(ha1_status|ha2_status|link_monitoring|path_monitoring|state_reason|state_duration|local_priority|peer_priority|preemptive)$/)\n  |> last()\n  |> map(fn: (r) => ({ _field: r._field, _value: string(v: r._value), row: \"HA\" }))\n  |> group()\n  |> pivot(rowKey: [\"row\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"row\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "HA Links and Monitoring",
+          "type": "table",
+          "description": "HA1 control link and HA2 data link status, link and path monitoring, the reason and duration of the current state, and the election priorities and preemption from show high-availability all."
         }
       ],
       "title": "HA Role Changes",
@@ -1695,7 +2095,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "pps",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -2129,10 +2529,30 @@
                 "lineWidth": 1,
                 "fillOpacity": 8,
                 "spanNulls": false,
-                "showPoints": "never"
+                "showPoints": "never",
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
               },
               "min": 0,
-              "max": 100
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              }
             },
             "overrides": []
           },
@@ -2245,10 +2665,30 @@
                 "lineWidth": 1,
                 "fillOpacity": 8,
                 "spanNulls": false,
-                "showPoints": "never"
+                "showPoints": "never",
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
               },
               "min": 0,
-              "max": 100
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              }
             },
             "overrides": []
           },
@@ -2281,13 +2721,13 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "cores = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r._field == \"cpu_pct\")\naverage = cores\n  |> filter(fn: (r) => r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Average (all cores)\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nactive = cores\n  |> filter(fn: (r) => r.core != \"average\" and r._value > 0.0)\n  |> map(fn: (r) => ({ r with _field: \"Average (active cores)\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nhottest = cores\n  |> filter(fn: (r) => r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Hottest core\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\nunion(tables: [average, active, hottest])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "cores = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r._field == \"cpu_pct\")\naverage = cores\n  |> filter(fn: (r) => r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Average (all cores)\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nactive = cores\n  |> filter(fn: (r) => r.core != \"average\" and r._value > 0.0)\n  |> map(fn: (r) => ({ r with _field: \"Average (active cores)\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nhottest = cores\n  |> filter(fn: (r) => r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Hottest core\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\npeak = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r._field == \"cpu_max_pct\" and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Hottest core (peak)\", _value: float(v: r._value) }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\nunion(tables: [average, active, hottest, peak])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
           "title": "CPU Summary - ${dataplane}",
           "type": "timeseries",
-          "description": "The all-core average matches SNMP. Cores reporting 0% (not used for packet processing) are excluded from the active-core average, which shows the real load of the packet-processing cores."
+          "description": "The all-core average matches SNMP. Cores reporting 0% (not used for packet processing) are excluded from the active-core average, which shows the real load of the packet-processing cores. Hottest core is the busiest one-minute average; the peak series is the highest per-core value sampled within each minute."
         },
         {
           "datasource": {
@@ -2834,6 +3274,644 @@
         "x": 0,
         "y": 53
       },
+      "id": 9012,
+      "panels": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never",
+                "axisLabel": "logs/s"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 54
+          },
+          "id": 3501,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "import \"strings\"\nfrom(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_logging\" and r.hostname == \"${hostname}\" and r._field =~ /_rate$/)\n  |> map(fn: (r) => ({ r with _field: strings.replaceAll(v: strings.trimSuffix(v: r._field, suffix: \"_rate\"), t: \"_\", u: \" \"), _value: float(v: r._value) }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Log Rate",
+          "type": "timeseries",
+          "description": "Logs per second reported by the management-plane log receiver (debug log-receiver statistics): incoming, written and forwarded."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never",
+                "axisLabel": "logs/s"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 54
+          },
+          "id": 3502,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "import \"strings\"\nfrom(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_logging\" and r.hostname == \"${hostname}\" and r._field =~ /discard|dropped/ and r._field !~ /_rate$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> map(fn: (r) => ({ r with _field: strings.replaceAll(v: r._field, t: \"_\", u: \" \") }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Logs Discarded (rate)",
+          "type": "timeseries",
+          "description": "Rate of logs the firewall discarded or dropped, from cumulative logging counters. Any sustained value means logs are lost before reaching disk or the log collector."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                }
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "app_version"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "App-ID"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "threat_version"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Threat"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "av_version"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Antivirus"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "wildfire_version"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "WildFire"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "url_filtering_version"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "URL filtering"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "device_certificate_status"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Device certificate"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "operational_mode"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Operational mode"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "multi_vsys"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Multi-VSYS"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 24,
+            "x": 0,
+            "y": 63
+          },
+          "id": 3503,
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_system\" and r.hostname == \"${hostname}\" and r._field =~ /^(app_version|threat_version|av_version|wildfire_version|url_filtering_version|device_certificate_status|operational_mode|multi_vsys)$/)\n  |> group(columns: [\"_field\"])\n  |> last()\n  |> map(fn: (r) => ({ _field: r._field, _value: string(v: r._value), row: \"System\" }))\n  |> group()\n  |> pivot(rowKey: [\"row\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"row\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Content Versions",
+          "type": "table",
+          "description": "Installed content and signature versions, device certificate status, operational mode and multi-VSYS state from show system info."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 67
+          },
+          "id": 3504,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_software\" and r.hostname == \"${hostname}\" and r._field == \"running\")\n  |> group(columns: [\"process\"])\n  |> last()\n  |> group()\n  |> map(fn: (r) => ({ _time: now(), _field: \"Not running\", _value: if string(v: r._value) == \"true\" or string(v: r._value) == \"1\" then 0 else 1 }))\n  |> sum()",
+              "refId": "A"
+            }
+          ],
+          "title": "Processes Not Running",
+          "type": "stat",
+          "description": "Management-plane daemons from show system software status that are not running."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                }
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "process"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Process"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "status"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Status"
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-text"
+                    }
+                  },
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "red"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 10,
+            "x": 4,
+            "y": 67
+          },
+          "id": 3505,
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_software\" and r.hostname == \"${hostname}\" and (r._field == \"running\" or r._field == \"status\"))\n  |> group(columns: [\"process\", \"_field\"])\n  |> last()\n  |> map(fn: (r) => ({ process: r.process, _field: r._field, _value: string(v: r._value) }))\n  |> group()\n  |> pivot(rowKey: [\"process\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> filter(fn: (r) => exists r.running and r.running != \"true\" and r.running != \"1\")\n  |> keep(columns: [\"process\", \"status\"])\n  |> sort(columns: [\"process\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Management Processes Not Running",
+          "type": "table",
+          "description": "Only daemons that are not running are listed; an empty table means every monitored process is up."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                }
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "disk"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Disk"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "status"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Status"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "healthy"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Healthy"
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background"
+                    }
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "true": {
+                            "text": "Healthy",
+                            "color": "green",
+                            "index": 0
+                          },
+                          "false": {
+                            "text": "Degraded",
+                            "color": "red",
+                            "index": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 10,
+            "x": 14,
+            "y": 67
+          },
+          "id": 3508,
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_raid\" and r.hostname == \"${hostname}\" and (r._field == \"status\" or r._field == \"healthy\"))\n  |> group(columns: [\"disk\", \"_field\"])\n  |> last()\n  |> map(fn: (r) => ({ disk: r.disk, _field: r._field, _value: string(v: r._value) }))\n  |> group()\n  |> pivot(rowKey: [\"disk\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> keep(columns: [\"disk\", \"status\", \"healthy\"])\n  |> sort(columns: [\"disk\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "RAID",
+          "type": "table",
+          "description": "Disk pair state from show system raid detail, on platforms with a RAID log disk (PA-5200/5400/5500/7000 Series)."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 71
+          },
+          "id": 3506,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: -30m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_globalprotect\" and r.hostname == \"${hostname}\" and r._field == \"current_users\" and not exists r.gateway)\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> max()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ _time: r._time, _field: \"GP users\", _value: float(v: r._value) }))",
+              "refId": "A"
+            }
+          ],
+          "title": "GP Users",
+          "type": "stat",
+          "description": "Current GlobalProtect users on the firewall (total without the per-gateway breakdown)."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 75
+          },
+          "id": 3507,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_globalprotect\" and r.hostname == \"${hostname}\" and r._field == \"current_users\")\n  |> map(fn: (r) => ({ r with _field: if exists r.gateway then \"Gateway \" + r.gateway else \"Total\", _value: float(v: r._value) }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "GlobalProtect Users",
+          "type": "timeseries",
+          "description": "Current GlobalProtect users: firewall total plus one series per gateway when the collector reports gateways."
+        }
+      ],
+      "title": "Logging and Management Health",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      },
       "id": 9005,
       "panels": [
         {
@@ -2859,7 +3937,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 54
+            "y": 55
           },
           "id": 17,
           "options": {
@@ -2915,7 +3993,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 54
+            "y": 55
           },
           "id": 18,
           "options": {
@@ -2973,7 +4051,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 64
+            "y": 65
           },
           "id": 19,
           "options": {
@@ -3133,7 +4211,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 64
+            "y": 65
           },
           "id": 3401,
           "options": {
@@ -3182,7 +4260,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 74
+            "y": 75
           },
           "id": 22,
           "options": {
@@ -3238,7 +4316,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 74
+            "y": 75
           },
           "id": 23,
           "options": {
@@ -3281,7 +4359,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 55
       },
       "id": 9100,
       "panels": [
@@ -3292,7 +4370,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
+              "unit": "celsius",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -3305,10 +4383,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 11,
-            "w": 24,
+            "h": 10,
+            "w": 12,
             "x": 0,
-            "y": 55
+            "y": 56
           },
           "id": 20,
           "options": {
@@ -3333,13 +4411,125 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sensors\" and r.hostname == \"${hostname}\" and r._field =~ /^(degrees_c|rpm|watts|volts|amps|value)$/)\n  |> map(fn: (r) => ({ r with _field: r.sensor_type + \" \" + r.slot + \" \" + r.description + \" \" + r._field }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sensors\" and r.hostname == \"${hostname}\" and r.sensor_type == \"thermal\" and r._field == \"degrees_c\")\n  |> map(fn: (r) => ({ r with _field: r.slot + \" \" + r.description }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
               "refId": "A"
             }
           ],
-          "title": "Environmental Sensor Values",
+          "title": "Temperatures by Slot",
           "type": "timeseries",
-          "description": "Thermal, fan and power values appear when the platform exposes them."
+          "description": "Thermal sensors from show system environmentals thermal."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "rpm",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 56
+          },
+          "id": 21,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sensors\" and r.hostname == \"${hostname}\" and r.sensor_type == \"fan\" and r._field == \"rpm\")\n  |> map(fn: (r) => ({ r with _field: r.slot + \" \" + r.description }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
+              "refId": "A"
+            }
+          ],
+          "title": "Fan Speed by Slot",
+          "type": "timeseries",
+          "description": "Fan speeds from show system environmentals fans."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 66
+          },
+          "id": 24,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sensors\" and r.hostname == \"${hostname}\" and r.sensor_type == \"power\" and r._field =~ /^(watts|volts|amps|value)$/)\n  |> map(fn: (r) => ({ r with _field: r.slot + \" \" + r.description + \" \" + r._field }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
+              "refId": "A"
+            }
+          ],
+          "title": "Power Sensor Values",
+          "type": "timeseries",
+          "description": "Power supply voltages, currents and wattage from show system environmentals power."
         },
         {
           "datasource": {
@@ -3358,12 +4548,12 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 9,
-            "w": 24,
-            "x": 0,
+            "h": 10,
+            "w": 12,
+            "x": 12,
             "y": 66
           },
-          "id": 21,
+          "id": 25,
           "options": {
             "showHeader": true,
             "cellHeight": "sm",
@@ -3377,13 +4567,13 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sensors\" and r.hostname == \"${hostname}\" and r._field == \"alarm\")\n  |> group(columns: [\"sensor_type\", \"slot\", \"description\"])\n  |> last()\n  |> group()\n  |> keep(columns: [\"sensor_type\", \"slot\", \"description\", \"_value\"])\n  |> rename(columns: {_value: \"alarm\"})",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sensors\" and r.hostname == \"${hostname}\" and r._field == \"alarm\")\n  |> group(columns: [\"sensor_type\", \"slot\", \"description\"])\n  |> last()\n  |> group()\n  |> keep(columns: [\"sensor_type\", \"slot\", \"description\", \"_value\"])\n  |> rename(columns: {_value: \"alarm\"})\n  |> sort(columns: [\"alarm\", \"sensor_type\", \"slot\"], desc: true)",
               "refId": "A"
             }
           ],
           "title": "Environmental Alarms",
           "type": "table",
-          "description": ""
+          "description": "Latest alarm flag of every sensor; alarmed sensors sort first."
         }
       ],
       "title": "Chassis and Environmental Sensors",
@@ -3610,6 +4800,6 @@
   "timezone": "browser",
   "title": "Palo Alto API Performance Monitoring",
   "uid": "paloalto-api-performance",
-  "version": 4,
+  "version": 5,
   "weekStart": ""
 }

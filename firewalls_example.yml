@@ -6,6 +6,10 @@
 # Keep this file simple: hostname, management IP, vendor, SNMP version,
 # and SNMP credentials. generate.sh discovers versions, models, chassis
 # status, VSYS/VDOM availability, and optional feature flags over SNMP.
+#
+# Secrets are exact ${VARIABLE} references resolved from .env (see
+# .env.example). Direct values also work but keep secrets in this file.
+# Use the firewall's own hostname (SNMP sysName) as hostname.
 
 #####################################################
 ## SNMPv3 examples
@@ -33,6 +37,17 @@
     counter_interval: 60
     # Maximum active severity=drop counter series retained per firewall.
     counter_limit: 256
+  # Advanced overrides (Palo Alto only). Leave them out: generate.sh infers
+  # them from the discovered model and PAN-OS version. A value set here
+  # always wins over discovery.
+  # chassis: true                # modular chassis; enables ENTITY sensor/state tables
+  # pa_cluster: true             # PA-cluster member; polls pan_pa_cluster (never inferred, default false)
+  # panos_10_2_metrics: false    # PAN-OS 10.2+ per-interface CPS table (panIfTable)
+  # panos_11_2_metrics: false    # PAN-OS 11.2+ panhrStorageUsage storage percentage
+  # panos_12_metrics: false      # PAN-OS 12.1+ objects (with vsys_total_cps)
+  # vsys_total_cps: false        # PAN-OS 12.1+ per-VSYS total CPS
+  # interface_utilization: false # PAN-OS 12.1+ panInterfaceUtilizationTable
+  # panos_version: "11.2.4"      # fallback only when SNMP discovery gets no answer
 
 - hostname: FGT-80F
   host: 192.0.2.102

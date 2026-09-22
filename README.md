@@ -4,40 +4,43 @@ Palo Alto and Fortinet firewall monitoring stack with Docker Compose, Telegraf, 
 
 ![FW-Monitoring dashboard](docs/assets/FW-Monitoring.png)
 
-Docker Compose stack for quick Palo Alto and Fortinet firewall monitoring with Telegraf, InfluxDB, and Grafana.
-
 The goal is simple operational visibility: CPU, memory, sessions, CPS, disk where useful, interface status, errors/discards, and throughput. It is useful when you need a quick factual view of firewall load without deploying a full NMS.
 
-The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB interface counters (`ifHCInOctets` and `ifHCOutOctets`). The optional API-only Palo Alto dashboard instead uses the hardware interface byte counters returned by `show counter interface all`. Neither path uses session or feature throughput summaries, which can miss offloaded traffic.
+The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB interface counters (`ifHCInOctets` and `ifHCOutOctets`). The optional API-only Palo Alto dashboards instead use the hardware interface byte counters returned by `show counter interface all`. Neither path uses session or feature throughput summaries, which can miss offloaded traffic.
 
 ## What You Get
 
-- InfluxDB 2.x for time series storage
-- Telegraf SNMP polling generated from `firewalls.yml`
-- Optional Palo Alto XML API polling for sessions, management-plane resources, per-core/dataplane CPU, interface state and throughput, HA, storage, environmental sensors, and selected drop counters
-- Grafana with provisioned InfluxDB datasource
-- Five monitoring dashboards:
+- InfluxDB 2.7 for time series storage, published on `127.0.0.1:8086` only
+- Grafana 13.2.2 with a provisioned InfluxDB (Flux) datasource
+- A custom Telegraf 1.40.1 (Alpine) image with Net-SNMP, the standard and vendor MIBs, and the Palo Alto API collector
+- Telegraf SNMP polling generated from `firewalls.yml`, split into a 20-second instance for load data and a 60-second instance for slow-moving tables
+- Optional Palo Alto XML API polling for sessions, management-plane resources, per-core dataplane CPU, ingress backlogs, interface state and throughput, HA, storage, environmental sensors, logging and management health, and selected drop counters
+- Five provisioned dashboards:
   - `Palo Alto Firewall Monitoring`
   - `Palo Alto Chassis Monitoring`
   - `Fortinet Firewall Monitoring`
   - `Palo Alto API Performance Monitoring`
   - `Palo Alto API Chassis Monitoring`
-- Best-effort SNMP discovery before Telegraf config generation
+- Best-effort SNMP discovery of model, software version, and features before the Telegraf configuration is generated
 
 ## Common Tasks
 
 - [Install or regenerate the stack](#quick-start)
 - [Open Grafana and view a dashboard](#open-grafana-and-view-dashboards)
-- [Upgrade an existing installation](#upgrade-an-existing-installation)
+- [Declare firewalls and their options](#firewall-inventory)
 - [Configure Palo Alto XML API monitoring](#palo-alto-xml-api-setup)
+- [Upgrade from v1.0.2 (SNMP-only, May 2026)](#upgrade-from-v102-snmp-only-may-2026)
+- [Upgrade from v1.1.0](#upgrade-from-v110)
+- [Upgrade any other installation](#upgrade-an-existing-installation)
 
 ## Requirements
 
-- Linux host with Docker and Docker Compose v2
+- Linux host with Docker and Docker Compose v2.24 or later (the Telegraf service uses an optional `env_file` entry)
 - Python 3 with `venv` and `pip`
 - UDP/161 reachable from the Docker host to each firewall
 - For optional Palo Alto API monitoring, TCP/443 (or the configured API port) reachable from the Telegraf container
 - SNMP enabled on the firewall management interface or the interface you poll
+- Outbound HTTPS from the Docker host during installation (container images, Python packages, Palo Alto MIB archives)
 - A local `.env` file based on `.env.example`
 - A local `firewalls.yml` file based on `firewalls_example.yml`
 
@@ -45,58 +48,41 @@ Palo Alto MIB files are downloaded by the generator when needed and are ignored 
 
 ## Quick Start
 
-1. Create local secrets:
+1. Create the local secrets file and change every `CHANGE_ME...` value:
 
-```bash
-cp .env.example .env
-nano .env
-```
+   ```bash
+   cp .env.example .env
+   nano .env
+   ```
 
-Change every `CHANGE_ME...` value.
+   `.env` holds the InfluxDB and Grafana bootstrap secrets and, recommended, the firewall SNMP secrets and API keys referenced from `firewalls.yml`. Remove the sample firewall variables you do not use.
 
-2. Create a local firewall inventory:
+2. Create the local firewall inventory:
 
-```bash
-cp firewalls_example.yml firewalls.yml
-```
+   ```bash
+   cp firewalls_example.yml firewalls.yml
+   nano firewalls.yml
+   ```
 
-3. Configure SNMP on the firewalls. Examples are below. For Palo Alto API monitoring, also follow the XML API setup section.
+   Declare each firewall with a hostname, management IP, vendor, and SNMP settings. Reference secrets as `${VARIABLE}` values defined in `.env`; see [Firewall Inventory](#firewall-inventory).
 
-4. Edit `firewalls.yml`:
+3. Configure SNMP on the firewalls ([Palo Alto](#palo-alto-snmp-setup), [Fortinet](#fortinet-snmp-setup)). For Palo Alto API monitoring, also follow [Palo Alto XML API Setup](#palo-alto-xml-api-setup).
 
-```bash
-nano firewalls.yml
-```
+4. Generate the configuration and start the stack:
 
-5. Bootstrap the local Python environment:
+   ```bash
+   ./generate.sh
+   ```
 
-```bash
-./generate.sh
-```
+   The wrapper creates `.venv`, installs the Python requirements, then runs `generate.py`. If Docker is missing on a Debian/Ubuntu host, run it once with `sudo ./generate.sh`: it installs Docker Engine and the Compose plugin from the official Docker repository, then continues. After the first run you can call `.venv/bin/python generate.py` directly.
 
-This optional wrapper creates `.venv`, installs the Python requirements, then runs `generate.py`.
+5. [Open Grafana and select a dashboard](#open-grafana-and-view-dashboards).
 
-If Docker is missing on a Debian/Ubuntu host, run the wrapper with `sudo` once. It installs Docker Engine from the official Docker repository, including the GPG keyring and Docker Compose plugin, then continues the generator:
-
-```bash
-sudo ./generate.sh
-```
-
-After the first run, you can call the Python generator directly:
-
-```bash
-.venv/bin/python generate.py
-```
-
-The Python generator discovers the firewalls over SNMP, renders `telegraf/telegraf.conf`, and starts the Docker Compose stack.
-
-The Compose services use `restart: unless-stopped`, so they come back automatically after a host reboot as long as Docker starts on boot.
-
-6. [Open Grafana and select a dashboard](#open-grafana-and-view-dashboards).
+The Compose services use `restart: unless-stopped`, so they come back automatically after a host reboot as long as Docker starts on boot. Rerun `./generate.sh` after every change to `firewalls.yml` or `.env`.
 
 ## Open Grafana and View Dashboards
 
-First confirm that the three services are running:
+First confirm that the three services are running and healthy:
 
 ```bash
 docker compose ps
@@ -114,7 +100,7 @@ http://<docker-host-ip>:3000
 
 Run `hostname -I` on the Docker host if you do not know its IP address. Use an address reachable from the browser's network.
 
-Sign in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` from the local `.env` file. These values initialize the administrator account on the first start. Changing them later does not automatically change the password already stored in `grafana-data/`.
+Sign in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` from the local `.env` file. These values initialize the administrator account on the first start. Changing them later does not change the password already stored in `grafana-data/`. Self sign-up, usage reporting, and update checks are disabled.
 
 In Grafana:
 
@@ -126,7 +112,7 @@ In Grafana:
    - **Palo Alto Chassis Monitoring** for chassis-specific SNMP metrics.
    - **Fortinet Firewall Monitoring** for Fortinet devices.
 3. Use the **hostname** selector at the top of the dashboard when several firewalls are configured.
-4. Select a time range that includes recent data. New API metrics may need one or two polling intervals before every panel is populated.
+4. Select a time range that includes recent data. Panels fed by the 60-second SNMP instance or by slower API categories need one or two minutes before they are populated; hourly API categories (system information, content versions, storage, RAID) appear after the first poll following a Telegraf start.
 
 If Grafana opens locally but not from another computer, allow inbound TCP port `3000` from the trusted administration network on the Docker host firewall. Do not expose Grafana directly to the public internet; use a restricted network or a TLS reverse proxy for remote access.
 
@@ -140,28 +126,38 @@ tail -100 logs/telegraf/telegraf.log
 
 ## Python Generator
 
-The project generator is Python-based:
-
 - `generate.py` contains the generation logic and is the main entry point.
 - `generate.sh` is only a convenience wrapper for creating `.venv`, installing dependencies, and launching `generate.py`.
 - `requirements.txt` contains the Python dependencies: `PyYAML` and `Jinja2`.
 - `requirements-dev.txt` adds the coverage and dependency-audit tools used by CI.
 
-The custom Telegraf runtime uses the official `telegraf:1.40.1-alpine` image. A build-only Debian stage downloads the standard IANA/IETF MIB corpus required for ENTITY-based chassis monitoring; Debian packages are not copied into the final image. The runtime preserves Telegraf UID `999` so log volumes created by earlier Debian-based releases remain writable during an in-place upgrade. The resulting runtime supports `amd64` and `arm64`. The upstream Alpine image does not publish an `arm/v7` variant; use a supported 64-bit host architecture.
+The custom Telegraf runtime uses the official `telegraf:1.40.1-alpine` image. A build-only Debian stage downloads the standard IANA/IETF MIB corpus required for ENTITY-based chassis monitoring; Debian packages are not copied into the final image. The runtime preserves Telegraf UID `999` so log directories created by earlier Debian-based releases remain writable during an in-place upgrade. The image supports `amd64` and `arm64`; the upstream Alpine image does not publish an `arm/v7` variant.
 
 On each run, the generator:
 
-- loads and validates `firewalls.yml`
-- performs best-effort SNMP discovery for version, model, serial, VSYS/VDOM, and chassis-related flags
-- writes `.firewalls.generated.yml`
-- writes the API-only runtime inventory to `telegraf/paloalto-api.json` (without API keys)
-- writes only the required Palo Alto keys to the protected `telegraf/paloalto-api.env` runtime file, so Telegraf does not receive unrelated `.env` secrets
-- downloads Palo Alto MIB files when needed
-- renders `telegraf/telegraf.conf`
-- builds the Telegraf image
-- starts or refreshes the Docker Compose stack
-- configures services to restart automatically after host reboot
-- writes a timestamped log under `logs/`
+1. checks Docker and Docker Compose, and restricts `.env` to mode `0600`;
+2. prepares `grafana-data/` and `logs/telegraf/`, widening permissions only when the container user cannot already write (see below);
+3. loads `firewalls.yml`, resolves `${VARIABLE}` references from `.env` or the process environment, and validates every entry;
+4. builds the Telegraf image and uses it for best-effort SNMP discovery of version, model, serial, and VSYS/VDOM presence. The SNMP credentials are written as a Net-SNMP `snmp.conf` and piped to the throwaway discovery container on stdin, so communities and passphrases never appear on a command line;
+5. infers the Palo Alto feature flags from the discovered (or declared) PAN-OS version and model, keeping every value you declared yourself, and writes the redacted `.firewalls.generated.yml` (mode `0600`);
+6. downloads the matching Palo Alto MIB archives when needed;
+7. writes the API runtime inventory `telegraf/paloalto-api.json` (no keys);
+8. writes `telegraf/paloalto-api.env` (mode `0600`) with only the SNMP secrets and API keys Telegraf needs. Each value is double-quoted, and each backslash, double quote, and dollar sign is prefixed with a backslash, so any value round-trips unchanged through Docker Compose. Values containing a line break or NUL byte are rejected; the error names the variable, never the value;
+9. renders `telegraf/telegraf.conf`, which references those secrets as `$FIREWALL_SNMP_...` / `PALOALTO_API_KEY_...` variables instead of containing them;
+10. rebuilds the Telegraf image and runs `docker compose up -d`;
+11. mirrors its output to a timestamped log under `logs/`.
+
+Environment overrides for a single run:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `SNMP_DISCOVERY` | `true` | Set to `false` to skip SNMP discovery and use only declared values. |
+| `SNMP_DISCOVERY_TIMEOUT` | `2` | Discovery timeout per SNMP request, in seconds (one retry). Raise it for slow or distant firewalls. |
+| `PALO_MIB_VERSION` | `11-2` | Palo Alto MIB archive used when no PAN-OS version is known. |
+
+```bash
+SNMP_DISCOVERY_TIMEOUT=5 ./generate.sh
+```
 
 For closed environments, preload a local wheel directory and point pip at it:
 
@@ -169,27 +165,27 @@ For closed environments, preload a local wheel directory and point pip at it:
 PIP_NO_INDEX=1 PIP_FIND_LINKS=./wheelhouse ./generate.sh
 ```
 
-You can also run the Python script directly after the virtual environment exists:
+`sudo` is not required when your user can run Docker and Docker is already installed. When the generator runs as root, it gives `grafana-data/` to the Grafana container UID `472`. Without root it cannot change ownership: if the Grafana container cannot already write to the directory, it falls back to mode `0777` and prints a warning. The safer one-time alternative is:
 
 ```bash
-.venv/bin/python generate.py
+sudo chown -R 472:472 grafana-data
 ```
-
-`sudo` is not required when your user can run Docker and Docker is already installed. When the generator is run as root, it fixes `grafana-data/` ownership for Grafana UID `472`.
 
 ## Firewall Inventory
 
-`firewalls.yml` is intentionally simple. In normal use, only declare the hostname, management IP, vendor, SNMP version, and SNMP credentials. Do not declare PAN-OS or FortiOS versions manually. The generator polls SNMP first and writes an ignored `.firewalls.generated.yml` with discovered version/model/feature flags.
+`firewalls.yml` is intentionally simple. In normal use, declare only the hostname, management IP, vendor, SNMP version, and SNMP credentials. Do not declare PAN-OS or FortiOS versions manually: the generator polls SNMP first and records the discovered version, model, and feature flags in the ignored `.firewalls.generated.yml`.
 
-`firewalls.yml` is ignored by Git because it usually contains real firewall IPs and SNMP credentials. Commit changes to `firewalls_example.yml` when you want to improve the sample inventory.
+`firewalls.yml` is ignored by Git because it usually contains real firewall IPs. Commit changes to `firewalls_example.yml` when you want to improve the sample inventory.
+
+Use the firewall's own configured hostname (its SNMP `sysName`) as `hostname`. The SNMP dashboards take the **hostname** selector value from `sysName`, while the API dashboards use the inventory `hostname`; matching them keeps both views on the same name.
 
 ### Reference Secrets from `.env`
 
 The recommended configuration keeps secrets out of YAML. Put each secret in the local `.env` file, then use an exact `${VARIABLE_NAME}` reference as the YAML value. The generator resolves these references before validation; the process environment takes precedence over `.env` when both define the same name.
 
 ```dotenv
-PA_PARIS_SNMP_AUTH=CHANGE_ME_AUTH_PASSWORD
-PA_PARIS_SNMP_PRIV=CHANGE_ME_PRIV_PASSWORD
+PA_440_SNMP_AUTH=CHANGE_ME_AUTH_PASSWORD
+PA_440_SNMP_PRIV=CHANGE_ME_PRIV_PASSWORD
 PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
 ```
 
@@ -200,17 +196,71 @@ PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
   snmp_version: 3
   username: fwmon
   auth_protocol: sha256
-  auth_password: ${PA_PARIS_SNMP_AUTH}
+  auth_password: ${PA_440_SNMP_AUTH}
   priv_protocol: aes256
-  priv_password: ${PA_PARIS_SNMP_PRIV}
+  priv_password: ${PA_440_SNMP_PRIV}
   api_monitoring:
     enabled: true
     api_key: ${PALOALTO_API_KEY_PA_440}
 ```
 
-The reference must occupy the complete YAML scalar; embedded forms such as `prefix-${NAME}` are not expanded. Generation stops with the missing variable name—but never its value—when a reference cannot be resolved. The generator enforces mode `0600` on `.env`; do not commit it. Direct values remain supported for backward compatibility, but environment references reduce secret duplication and are recommended for new installations.
+The reference must occupy the complete YAML scalar; embedded forms such as `prefix-${NAME}` are not expanded. Generation stops with the missing variable name, never its value, when a reference cannot be resolved or is empty. The generator enforces mode `0600` on `.env`; do not commit it. Direct values in `firewalls.yml` remain supported for backward compatibility, but environment references are recommended.
 
-Minimal Palo Alto SNMPv3:
+### Supported Keys
+
+Firewall entry:
+
+| Key | Required | Default | Description |
+| --- | --- | --- | --- |
+| `hostname` | yes | | Unique name; see the `sysName` note above. |
+| `host` | yes | | IP address or DNS name polled over SNMP (UDP/161); also used for the API unless `api_monitoring.host` is set. |
+| `vendor` | no | `paloalto` | `paloalto` or `fortinet` (aliases `panos`, `palo`, `palo_alto`, `fortigate`, `fortios`). |
+| `snmp_version` | no | `2` | `2` (SNMPv2c) or `3`. |
+| `community` | SNMPv2c | | SNMPv2c community. |
+| `username` | SNMPv3 | | SNMPv3 user (not treated as a secret). |
+| `auth_protocol` | no | `sha` | `md5`, `sha`/`sha1`, `sha224`, `sha256`, `sha384`, `sha512`. |
+| `auth_password` | SNMPv3 | | SNMPv3 authentication passphrase. |
+| `priv_protocol` | no | `aes` | `des`, `aes`/`aes128`, `aes192`, `aes256`. |
+| `priv_password` | SNMPv3 | | SNMPv3 privacy passphrase (Telegraf always polls with `authPriv`). |
+| `panos_version` | no | discovered | Palo Alto only. Fallback used for the feature flags and MIB download when discovery gets no answer; a discovered version always wins. |
+| `model` | no | discovered | Optional `model` tag on every SNMP metric; replaced by the discovered model. |
+| `cluster` | no | | Optional `cluster` tag on every SNMP metric, for grouping HA pairs. |
+
+Advanced Palo Alto overrides. Leave them out unless discovery gets them wrong or a walk must be disabled; a value declared in `firewalls.yml` (true or false) always wins over inference:
+
+| Key | Default | Gates |
+| --- | --- | --- |
+| `chassis` | inferred from the model (PA-5450, PA-7050, PA-7080, PA-7500) | ENTITY, ENTITY-SENSOR, and ENTITY-STATE tables in the 60-second SNMP instance. |
+| `pan_entity_ext` | same as `chassis` | PAN-ENTITY-EXT module tables and chassis power scalars. |
+| `pa_cluster` | `false`, never inferred | The `pan_pa_cluster` table (PAN-OS 11.2+ PA-cluster summary objects). Opt-in because some PAN-OS releases stall `snmpd` on these objects. |
+| `panos_10_2_metrics` | PAN-OS 10.2+ | The `pan_interfaces_cps` table (`panIfTable`, per-interface CPS). |
+| `panos_11_2_metrics` | PAN-OS 11.2+ | `panhrStorageUsage` (`storage_usage_pct` in `pan_hr_storage`). |
+| `panos_12_metrics` | PAN-OS 12.1+ | Together with `vsys_total_cps`, the per-VSYS `panVsysTotalCps` field. |
+| `vsys_total_cps` | PAN-OS 12.1+ | See `panos_12_metrics`. |
+| `interface_utilization` | PAN-OS 12.1+ | The `pan_interface_utilization` table (`panInterfaceUtilizationTable`). |
+
+When neither discovery nor `panos_version` provides a version, the version-gated flags stay unset and those optional walks are skipped.
+
+`api_monitoring` block (Palo Alto only; see [Palo Alto XML API Setup](#palo-alto-xml-api-setup)):
+
+| Key | Default | Range / description |
+| --- | --- | --- |
+| `enabled` | `true` when the block exists | Set `false` to keep the block but stop API polling. Without a block, API monitoring is off. |
+| `host` | firewall `host` | API address when HTTPS reaches the firewall through another address or DNS name. |
+| `api_key` | | API key, preferably as `${VARIABLE}`. Set exactly one of `api_key` or `api_key_env`. |
+| `api_key_env` | | Legacy form: the name of a `.env` variable holding the key. |
+| `port` | `443` | 1-65535. |
+| `verify_tls` | `true` | Set `false` only for a lab with a self-signed certificate. |
+| `timeout` | `15` | 1-120 seconds per API request. |
+| `interval` | `20` | 10-3600 seconds: sessions and interface counters. |
+| `resource_interval` | `60` | 10-3600 seconds: management, dataplane, VSYS, HA, sensors, logging, and other health categories. |
+| `counter_interval` | `60` | 10-3600 seconds: global drop and DoS counters. |
+| `counter_limit` | `256` | 16-2048 global counter series kept per firewall. |
+| `system_interval` | `3600` | 60-86400 seconds: system information, storage, RAID, chassis inventory. |
+
+### Examples
+
+Palo Alto SNMPv3 with API monitoring:
 
 ```yaml
 - hostname: PA-440
@@ -233,7 +283,7 @@ Minimal Palo Alto SNMPv3:
     counter_interval: 60
 ```
 
-Minimal Fortinet SNMPv3:
+Fortinet SNMPv3:
 
 ```yaml
 - hostname: FGT-80F
@@ -247,7 +297,7 @@ Minimal Fortinet SNMPv3:
   priv_password: ${FGT_80F_SNMP_PRIV}
 ```
 
-SNMPv2c is also supported:
+SNMPv2c:
 
 ```yaml
 - hostname: PA-440
@@ -257,15 +307,44 @@ SNMPv2c is also supported:
   community: ${PA_440_SNMP_COMMUNITY}
 ```
 
+PA-cluster member with an advanced override:
+
+```yaml
+- hostname: PA-CLUSTER-NODE-1
+  host: 192.0.2.110
+  vendor: paloalto
+  snmp_version: 2
+  community: ${PA_CLUSTER_NODE_1_SNMP_COMMUNITY}
+  pa_cluster: true
+```
+
+## SNMP Polling Design
+
+Every firewall gets two Telegraf `[[inputs.snmp]]` instances that share the same agent, credentials, and tags. Measurement, field, and tag names are the dashboard contract and did not change when the polling was split.
+
+| Instance | Interval | Palo Alto | Fortinet |
+| --- | --- | --- | --- |
+| Fast | 20 s (agent interval) | `pan_system` scalars (CPU, RAM, sessions, CPS, HA state, GlobalProtect), `interfaces`, `pan_hr_processors`, `vsys`, `pan_zones`, `pan_interfaces_cps` (with `panos_10_2_metrics`), `pan_interface_utilization` (with `interface_utilization`), chassis power scalars in chassis mode | `fortinet_system` scalars (CPU, memory, sessions, CPS, disk, HA mode), `interfaces`, `fortinet_processors` |
+| Slow | 60 s, `max_repetitions = 25` | `pan_global_counters` (about 90 scalar counters fetched with a few GET requests instead of one walk per counter), `pan_hr_storage`, `pan_hr_devices`, `pan_pa_cluster` (with `pa_cluster`), and in chassis mode the ENTITY, ENTITY-SENSOR, ENTITY-STATE, and PAN-ENTITY-EXT tables | `fortinet_vdoms`, `fortinet_hw_sensors`, `fortinet_ha_members` |
+
+Both instances request up to 25 rows per GETBULK round trip. The split keeps the capacity/load data at 20 seconds while reducing the SNMP work on the firewall management plane; panels built on the slow instance refresh once per minute.
+
+Other details:
+
+- CPU views show the global CPU and every per-processor or dataplane CPU (`pan_hr_processors`, `fortinet_processors`).
+- `pan_entity_sensors` and `pan_entity_states` carry an `entity_name` tag (from `entPhysicalName`), so the chassis dashboard labels each sensor and slot readably. The chassis dashboard scales ENTITY-SENSOR values with `entPhySensorScale`/`entPhySensorPrecision` and splits them by sensor type.
+- `fortinet_hw_sensors.value` is converted to a float so it can be graphed and thresholded.
+- Palo Alto storage and packet-buffer panels use `panhrStorageUsage` when available and fall back to `hrStorageUsed / hrStorageSize` otherwise.
+
 ## Palo Alto XML API Setup
 
-API monitoring is optional and Palo Alto-only. Its dedicated dashboard is API-only, including interface throughput; the existing SNMP dashboards remain unchanged.
+API monitoring is optional and Palo Alto-only. Its dedicated dashboards are API-only, including interface throughput; the SNMP dashboards keep working unchanged.
 
-Create a dedicated PAN-OS administrator with a custom role that grants only XML API **Operational Requests** and **Show** access. Avoid using a full superuser account for ongoing collection.
+Create a dedicated PAN-OS administrator with a custom role that grants only XML API **Operational Requests** access. Avoid using a full superuser account for ongoing collection.
 
-### Choose Where to Store the API Key
+### Store the API Key in `.env` (Recommended)
 
-The recommended option stores the API key in `.env` and leaves only a variable reference in `firewalls.yml`:
+The recommended layout keeps the key in `.env` and only a variable reference in `firewalls.yml`:
 
 ```dotenv
 PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
@@ -292,7 +371,7 @@ PALOALTO_API_KEY_PA_440=CHANGE_ME_PALO_ALTO_API_KEY
     system_interval: 3600
 ```
 
-Never put a real key in `firewalls_example.yml`, a commit, a ticket, or a shared log. The earlier `api_key_env` syntax remains supported for existing installations:
+Never put a real key in `firewalls_example.yml`, a commit, a ticket, or a shared log. The earlier `api_key_env` syntax remains supported:
 
 ```yaml
   api_monitoring:
@@ -317,50 +396,87 @@ By default, API polling uses the firewall-level `host`, which is also used for S
     api_key: ${PALOALTO_API_KEY_PA_440}
 ```
 
-### Generate and Store a Key
+### Generate a Key with `paloalto_api_key.py`
 
-The helper parses `firewalls.yml` and lists only the declared Palo Alto firewalls. Select one by number, enter the API username and password, and the helper uses the declared `host` automatically (or the existing `api_monitoring.host` override). By default it stores the generated secret in `.env`, writes an `${ENVIRONMENT_VARIABLE}` reference in the selected YAML entry, and sets both files to mode `0600`:
+The helper reads `firewalls.yml`, lists the declared Palo Alto firewalls, and asks for the API username and password. It uses the declared `host` (or the existing `api_monitoring.host`) automatically. Run it after `./generate.sh` has created `.venv`:
 
 ```bash
 .venv/bin/python paloalto_api_key.py
 ```
 
-Example interaction:
-
 ```text
 Palo Alto firewalls declared in the inventory:
-  1. PARIS-PA-01 (192.0.2.101) [API disabled]
+  1. PA-440 (192.0.2.101) [API disabled]
   2. LYON-PA-01 (192.0.2.102) [API enabled]
 Select a firewall [1-2]: 1
 API username: fwmon-api
 API password:
+API key stored in .env as PALOALTO_API_KEY_PA_440 (mode 0600).
 ```
 
-For scripts and unattended workflows, bypass the menu with `--hostname`; the helper resolves the declared API address automatically. `--host` remains available to supply or replace a distinct API address:
+With the default `--storage env`, the helper:
+
+1. appends (or replaces) this line in `.env`, where the name is `PALOALTO_API_KEY_` followed by the hostname in upper case with every other character turned into `_`:
+
+   ```dotenv
+   # Palo Alto XML API monitoring key.
+   PALOALTO_API_KEY_PA_440=<generated key>
+   ```
+
+2. writes or updates the `api_monitoring` block of the selected entry, keeping any polling settings already there:
+
+   ```yaml
+     api_monitoring:
+       enabled: true
+       port: 443
+       verify_tls: true
+       api_key: ${PALOALTO_API_KEY_PA_440}
+   ```
+
+3. sets both files to mode `0600`.
+
+The helper rewrites `firewalls.yml` as plain YAML, so comments in that file are not kept. Before its first rewrite it saves the original as `firewalls.yml.bak`; later runs never overwrite that backup. The password and the key are never printed.
+
+Then apply the change:
 
 ```bash
-.venv/bin/python paloalto_api_key.py --hostname PA-440 --username fwmon-api
-.venv/bin/python paloalto_api_key.py --hostname PA-440 --host api-pa.example.test --username fwmon-api
+./generate.sh
 ```
 
-Direct YAML storage remains available for backward compatibility when explicitly requested:
+Useful options:
+
+- `--hostname PA-440` selects the entry without the menu (for scripts).
+- `--host api-pa.example.test` supplies or replaces a distinct API address.
+- `--username fwmon-api` skips the username prompt; the password is always prompted.
+- `--port 8443` uses another HTTPS port.
+- `--insecure` disables certificate verification for a lab with a self-signed certificate and writes `verify_tls: false`. `verify_tls: true` is the secure default: install a trusted firewall certificate or trust its issuing CA.
+- `--storage yaml` stores the key directly in `firewalls.yml` instead of `.env` (backward compatibility only).
+
+For several firewalls, run the helper once per firewall, then regenerate once:
 
 ```bash
-.venv/bin/python paloalto_api_key.py \
-  --hostname PA-440 \
-  --username fwmon-api \
-  --storage yaml
+for fw in PARIS-PA-01 LYON-PA-01 BORDEAUX-PA-01; do
+  .venv/bin/python paloalto_api_key.py --hostname "$fw" --username fwmon-api
+done
+./generate.sh
 ```
 
-The password and generated key are never printed. Existing polling settings in `api_monitoring` are preserved when a key is rotated or its storage mode changes. Before its first rewrite, the helper preserves the original inventory as `firewalls.yml.bak`; later runs do not overwrite that initial backup.
-
-`verify_tls: true` is the secure default. Install a trusted firewall certificate or the issuing internal CA on the Docker host/container. For a temporary lab with a self-signed certificate, pass `--insecure`; the helper then writes `verify_tls: false` explicitly.
+Each firewall gets its own `PALOALTO_API_KEY_<HOSTNAME>` line in `.env` and its own reference in `firewalls.yml`. Hostnames must be unique; two hostnames that differ only by punctuation or case would map to the same variable name.
 
 ### Docker and Non-Docker Variable Handling
 
-With the normal Docker Compose workflow, no manual `export` or `docker -e` command is required. `generate.py` resolves `${VARIABLE}` references, direct `api_key` values, and the legacy `api_key_env` form. It writes only the required API and SNMP secrets to the mode-`0600` generated file `telegraf/paloalto-api.env`; `telegraf.conf` contains environment-variable references rather than clear-text credentials. Docker Compose injects that protected file into Telegraf. Other `.env` secrets, such as Grafana and InfluxDB administrator passwords, are not passed to the Telegraf container. Generated enriched inventory is mode `0600` and redacts all SNMP and API credentials.
+With the normal Docker Compose workflow, no manual `export` or `docker -e` command is required. `generate.py` resolves `${VARIABLE}` references, direct values, and the legacy `api_key_env` form, then writes only the required SNMP and API secrets to the mode-`0600` file `telegraf/paloalto-api.env`. Docker Compose injects that file into the Telegraf container only; Grafana and InfluxDB administrator secrets are not passed to Telegraf. `telegraf.conf` contains variable references such as `$FIREWALL_SNMP_PA_440_COMMUNITY_<HASH>`, not credentials.
 
-For a one-shot diagnostic from the Linux host rather than from Docker, first generate the runtime files, then let the collector load the protected environment file itself:
+The runtime file uses double-quoted values with backslash escapes, for example:
+
+```dotenv
+FIREWALL_SNMP_PA_440_COMMUNITY_1A2B3C4D="CHANGE_ME_COMMUNITY"
+PALOALTO_API_KEY_YAML_PA_440_5E6F7A8B="CHANGE_ME_PALO_ALTO_API_KEY"
+```
+
+Do not edit it by hand; it is recreated by every generator run.
+
+For a one-shot diagnostic from the Linux host rather than from Docker, generate the runtime files first, then let the collector load the protected environment file itself. It accepts the current double-quoted format and the single-quoted format written by v1.1.0:
 
 ```bash
 python3 telegraf/paloalto_api_collector.py \
@@ -369,7 +485,7 @@ python3 telegraf/paloalto_api_collector.py \
   --once
 ```
 
-The supported full monitoring deployment remains Docker Compose; the host command is intended for connectivity and parser diagnostics.
+The supported deployment remains Docker Compose; the host command is intended for connectivity and parser diagnostics.
 
 ### Many Palo Alto Firewalls
 
@@ -406,46 +522,294 @@ API monitoring is configured independently for every Palo Alto entry. Firewalls 
   # No api_monitoring block: this firewall remains SNMP-only.
 ```
 
-Use a unique `hostname` for every firewall and, when using `.env`, a clear unique variable name for every device. Run `paloalto_api_key.py` once per firewall that needs a generated key, or add existing keys manually. The collector serializes calls within one firewall and polls different firewalls in parallel, so adding a slow device does not block the others.
+The collector serializes calls within one firewall and polls different firewalls in parallel, so a slow device does not block the others.
 
-The collector polls API categories sequentially for each firewall and only parallelizes between firewalls. Session and hardware interface counters use `interval`, which cannot be configured below 10 seconds. Management-plane process metrics are aggregated by command name and limited to the 32 busiest processes per poll, avoiding PID-based cardinality.
+### What the API Collector Polls
 
-Global counters use the PAN-OS server-side `severity drop` filter. All active drop counters, including their category, aspect, rate, and description, are retained up to `counter_limit` (default `256`, range `16`–`2048`). Priority resource, policy, DoS, allocation, and TCP counters are retained first if the limit is reached. Grafana exposes **Counter category** and **Counter aspect** selectors for interactive filtering. Cumulative values are stored and Grafana calculates rates, avoiding the shared sampling state created by PAN-OS `delta yes`.
+One long-running collector process (Telegraf `inputs.execd`) schedules each category independently per firewall:
 
-The `Palo Alto API Performance Monitoring` dashboard works for both compact and multi-blade systems and reads only PAN-OS XML API measurements. Its main view mirrors the standard dashboard with platform, PAN-OS version, uptime, MP/DP CPU, RAM, sessions, CPS, session utilization, and global throughput. It adds a colored current-load strip (DP CPU average, hottest DP core, MP CPU/RAM, sessions, session table, CPS, and throughput), a per-port link-utilization table, worst-dataplane resource pressure, and the global drop rate by counter category. Additional details are grouped into collapsible sections for HA (local and peer role, configuration and session sync), interfaces, errors/discards, one repeated section per VSYS, zones and logical interfaces, per-dataplane details, session protocols, curated DoS/zone-protection drops, filtered global counters, MP load/storage, and environmental sensors.
+| Category | PAN-OS command | Measurement(s) | Schedule |
+| --- | --- | --- | --- |
+| `sessions` | `show session info` | `paloalto_api_sessions` | `interval` (20 s) |
+| `interfaces` | `show counter interface all` | `paloalto_api_interfaces`, `paloalto_api_logical_interfaces` | `interval` (20 s) |
+| `system` | `show system info` | `paloalto_api_system` (model, PAN-OS, uptime, App/Threat/AV/WildFire/URL content versions, device certificate status, operational mode, multi-VSYS) | `system_interval` (3600 s) |
+| `vsys` (optional) | `show session meter` | `paloalto_api_vsys` | `resource_interval` (60 s) |
+| `interface_status` | `show interface all` | `paloalto_api_interfaces` (state, speed, zone, VSYS) | `resource_interval` |
+| `management` | `show system resources` | `paloalto_api_management`, `paloalto_api_processes` | `resource_interval` |
+| `dataplane` | `show running resource-monitor minute last 1` | `paloalto_api_dataplane_cpu` (`cpu_pct` one-minute average, `cpu_max_pct` peak), `paloalto_api_dataplane_resources` | `resource_interval` |
+| `ingress_backlogs` (optional) | `show running resource-monitor ingress-backlogs` | `paloalto_api_ingress_backlogs` (`usage_pct`, `sessions` per dataplane) | `resource_interval` |
+| `counters` | `show counter global` with `severity drop` and `aspect dos` filters | `paloalto_api_counters` | `counter_interval` (60 s) |
+| `ha` | `show high-availability state` | `paloalto_api_ha` (role, peer, sync, HA1/HA2 link status, link/path monitoring, priorities, preemption, state reason) | `resource_interval` |
+| `thermal`, `fans`, `power` (optional) | `show system environmentals ...` | `paloalto_api_sensors` | `resource_interval` |
+| `logging` (optional) | `debug log-receiver statistics` | `paloalto_api_logging` (log rates, discarded/dropped counters) | `resource_interval` |
+| `globalprotect` (optional) | `show global-protect-gateway statistics` | `paloalto_api_globalprotect` (current users, total and per gateway) | `resource_interval` |
+| `software` (optional) | `show system software status` | `paloalto_api_software` (per-process running state) | `resource_interval` |
+| `storage` | `show system disk-space` | `paloalto_api_storage` | `system_interval` |
+| `raid` (optional) | `show system raid detail` | `paloalto_api_raid` | `system_interval`; PA-5200/5400/5500/7000/7500 only |
+| `chassis_inventory` | `show chassis inventory` | `paloalto_api_chassis_inventory` | `system_interval`; modular only |
+| `chassis_status`, `chassis_power` | `show chassis status`, `show chassis power` | `paloalto_api_chassis_status`, `paloalto_api_chassis_power` | `resource_interval`; modular only |
 
-The XML API reveals dataplane saturation that SNMP hides. SNMP and the API both report the average of all dataplane cores, including cores that are not used for packet processing and stay at 0%. On a PA-5500, for example, both report about 57% while every active core is above 90%. The API dashboards therefore also show the hottest core, the active-core average, and a per-core load map for every dataplane.
+Notes:
 
-Per-VSYS sessions come from `show session meter`. Per-zone and per-VSYS throughput are derived from the logical interface (`ifnet`) counters that `show counter interface all` already returns. The collector tags them with the zone and VSYS learned from `show interface all`. The XML API has no per-VSYS or per-zone CPS equivalent to the SNMP `panVsysTotalCps` and zone CPS objects: the `ifnet` `tcp_conn`/`udp_conn` counters do not count created sessions and remain at zero on live firewalls, so the API dashboards do not show per-VSYS or per-zone CPS. Global CPS is still shown. These logical counters also provide subinterface, tunnel, and VLAN throughput and per-reason drops such as no route, no ARP, flow state, and spoofing. Global and per-port throughput still uses only the hardware `ibytes` / `obytes` counters. DoS and zone-protection counters that are not drops, such as SYN-cookie activity and block-table entries, are collected with an additional `aspect dos` global-counter filter and share the `counter_limit` bound. If a platform rejects an optional command such as `show session meter` or the environmental commands, the collector logs it once and stops polling that command until Telegraf restarts.
+- Optional categories are disabled for a firewall the first time PAN-OS rejects their command (unsupported command, or for GlobalProtect "not configured"/no gateway), logged once, and not retried until Telegraf restarts. Other categories are never affected.
+- The chassis categories run only on modular PA-5450, PA-7050, PA-7080, and PA-7500 models, detected from `show system info`.
+- `dataplane` reads the last completed one-minute resource-monitor bucket, so a `resource_interval` below 60 seconds re-reads the same minute.
+- Every physical sensor value (temperature, fan RPM, watts, volts, amps, value/min/max) and chassis power figure is written as a float. Counters (sessions, CPS, octets, packets) stay integers.
+- Management-plane process metrics are aggregated by command name and limited to the 32 busiest processes per poll, avoiding PID-based cardinality.
+- Global counters use the PAN-OS server-side `severity drop` filter plus an `aspect dos` filter for SYN-cookie and block-table counters. Active counters are retained up to `counter_limit`, priority resource, policy, DoS, allocation, and TCP counters first. Cumulative values are stored and Grafana calculates rates, avoiding the shared sampling state created by PAN-OS `delta yes`.
 
-Data-plane CPU is tagged by dataplane and core. Grafana creates one collapsible row per dataplane, containing its individual core curves and API resource pressure (sessions, packet buffers, packet descriptors, and software tags when exposed). This supports compact systems and multi-DP platforms such as PA-5500/PA-7000/PA-7500; the same series also feed the dedicated high-end/chassis dashboard.
+### API Dashboards
 
-The interface section automatically creates a dedicated In/Out throughput panel for every active physical Ethernet port, matching the drill-down available in the SNMP dashboard. A separate API detail section retains packet-rate curves plus current link state, speed, duplex, mode, zone, VSYS, and forwarding instance. Throughput is calculated from deltas of the hardware `ibytes` / `obytes` counters returned by `show counter interface all`; it does not use SNMP or the less reliable session throughput summary. Global throughput is restricted to physical Ethernet ports so aggregate `internal`, `vlan`, `loopback`, and `tunnel` counters are not double-counted.
+`Palo Alto API Performance Monitoring` works for compact and multi-dataplane systems and reads only XML API measurements:
 
-The separate `Palo Alto API Chassis Monitoring` dashboard targets high-end PA-5200, PA-5400, PA-5500, PA-7000, and PA-7500 platforms. It contains the complete main view and every section of the API performance dashboard, plus chassis-specific sections. This includes fixed multi-dataplane models such as PA-5580: the API dashboard keeps one curve per returned dataplane/core. On modular models, the dashboard also combines `show chassis inventory`, `show chassis status`, and `show chassis power` for installed-card details, live slot/card state, system role, configuration state, disabled slots, and power. The collector only issues these chassis-specific calls to PA-5450, PA-7050, PA-7080, and PA-7500 models, so a fixed PA-5580 gets its DP, interface, MP, sensor, HA, and counter panels without repeated unsupported-command errors; slot inventory/status/power panels are simply empty.
+- A current-load strip with 30-minute sparklines: DP CPU average, hottest DP core (including the one-minute peak), MP CPU and RAM, sessions, session table, CPS, and throughput.
+- CPU, RAM, session-utilization, resource-pressure, and per-core panels with dashed 70% and 90% guide lines; a hottest-core line and an active-core summary per dataplane.
+- An **Ingress Backlog by Dataplane** overview panel, a link-utilization table, worst-dataplane resource pressure, and the global drop rate stacked by counter category.
+- Collapsible sections for HA (role timeline, sync state, and an **HA Links and Monitoring** table), interfaces and errors/discards, one repeated section per VSYS, zones and logical interfaces, one section per dataplane, session protocols, DoS/zone-protection drops, filtered global counters, MP load/storage, and environmental sensors split into temperature, fan, power, and alarm panels.
+- A collapsed **Logging and Management Health** section: log rate, logs discarded, content versions, management processes not running, GlobalProtect users, and RAID state.
+
+The XML API reveals dataplane saturation that SNMP hides. SNMP and the API both report the average of all dataplane cores, including cores that never process packets and stay at 0%. On a PA-5500, for example, both report about 57% while every active core is above 90%. The API dashboards therefore also show the hottest core, the active-core average, and a per-core load map for every dataplane.
+
+`Palo Alto API Chassis Monitoring` targets PA-5200, PA-5400, PA-5500, PA-7000, and PA-7500 platforms. It contains the full main view plus:
+
+- an uncollapsed chassis health strip: cards up, cards not up, power budget used, hottest sensor, sensor alarms, and slowest fan;
+- a colored per-slot state timeline under the load strip;
+- slot inventory with installed cards, live slot state, RAID, and chassis power budget;
+- thermal, fan, and power sensors by slot.
+
+Fixed multi-dataplane models such as PA-5580 get the per-DP, interface, MP, sensor, HA, and counter panels; slot inventory/status/power panels simply stay empty.
+
+Per-VSYS sessions come from `show session meter`. Per-zone and per-VSYS throughput come from the logical interface (`ifnet`) counters already returned by `show counter interface all`, tagged with the zone and VSYS learned from `show interface all`. The XML API has no per-VSYS or per-zone CPS equivalent to the SNMP `panVsysTotalCps` and zone CPS objects, so the API dashboards show only global CPS. Global and per-port throughput uses only the hardware `ibytes` / `obytes` counters of physical Ethernet ports, so aggregate `internal`, `vlan`, `loopback`, and `tunnel` counters are not double-counted.
 
 ### API Coverage and Deliberate Limits
 
-The API dashboards intentionally collect the high-value performance and health data that is unavailable, incomplete, or less actionable through the project SNMP views: session protocol counts and utilization, packet rate, MP load/swap/tasks/processes, per-core and per-dataplane CPU including the hottest core, link utilization, per-VSYS sessions, per-zone throughput, egress errors and link flaps, logical interface drop reasons, HA peer and sync state, dataplane session/buffer/descriptor pressure, filtered global drop counters with diagnostic metadata, interface zone/VSYS/forwarding context, HA state, storage, environmental sensors, and modular chassis inventory/status/power.
+The API dashboards collect the high-value performance and health data that is unavailable, incomplete, or less actionable through SNMP: session protocol counts and utilization, packet rate, MP load/swap/tasks/processes, per-core CPU with peaks, ingress backlogs, link utilization, per-VSYS sessions, per-zone throughput, egress errors and link flaps, logical interface drop reasons, HA links and sync state, dataplane resource pressure, filtered global drop counters, logging pipeline health, management daemon state, content versions, storage, RAID, environmental sensors, and modular chassis inventory/status/power.
 
-The XML API can expose much more, but “everything available” is not a safe monitoring target. Route/ARP/User-ID tables, full session lists, logs, ACC reports, configuration object counts, and running configuration are deliberately excluded: they can have high or unbounded cardinality, increase management-plane load, reveal sensitive traffic or configuration data, and may require broader API permissions. This project keeps the steady-state collector read-only, bounded, and focused on capacity/load. Add those datasets to a troubleshooting or capacity-planning tool rather than the 20-second performance loop.
+The XML API can expose much more, but "everything available" is not a safe monitoring target. Route/ARP/User-ID tables, full session lists, logs, ACC reports, configuration object counts, and running configuration are deliberately excluded: they can have high or unbounded cardinality, increase management-plane load, reveal sensitive traffic or configuration data, and may require broader API permissions. The collector stays read-only, bounded, and focused on capacity/load.
+
+## Security Notes
+
+- **InfluxDB** is published on `127.0.0.1:8086` only. Grafana and Telegraf reach it over the Compose network (`http://influxdb:8086`). To query it from another machine, prefer an SSH tunnel (`ssh -L 8086:127.0.0.1:8086 <user>@<docker-host>`). If it must listen on the network, change the `ports` entry in `docker-compose.yaml` to `"0.0.0.0:8086:8086"` (or a specific host IP) and restrict access with a host firewall or VPN.
+- **Grafana** runs the pinned 13.2.2 release, with self sign-up, usage reporting, and update checks disabled. Keep port 3000 on a trusted administration network or behind a TLS reverse proxy.
+- **Secrets never reach a command line.** SNMP discovery credentials are piped to the discovery container as an `snmp.conf` on stdin; runtime SNMP secrets and API keys reach Telegraf through the mode-`0600` `telegraf/paloalto-api.env` file; API keys are sent in the `X-PAN-KEY` header.
+- `.env`, `firewalls.yml`, `.firewalls.generated.yml` (credentials redacted), and `telegraf/paloalto-api.env` are mode `0600` and ignored by Git. `telegraf.conf` is world-readable but contains only variable references.
+- The manual `snmpget` troubleshooting commands under [Validate](#validate) do put a credential on the command line; use them only for one-off tests and clear your shell history afterwards if needed.
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and image scanning.
+
+## Upgrade from v1.0.2 (SNMP-only, May 2026)
+
+This section is for installations still running v1.0.2 (tag `v1.0.2`, up to commit `1176aac`). Compared with v1.0.2, the current version:
+
+| Area | v1.0.2 | Now |
+| --- | --- | --- |
+| Palo Alto XML API | not available | optional, per firewall (`api_monitoring`) |
+| Telegraf image | Debian-based Telegraf 1.32 | Alpine-based Telegraf 1.40.1, same UID `999` |
+| SNMP secrets | clear text in `firewalls.yml`, `.firewalls.generated.yml`, and `telegraf.conf` | `${VARIABLE}` references to `.env` supported; `telegraf.conf` holds only `$FIREWALL_SNMP_*` references; generated inventory is redacted |
+| `.env` | InfluxDB and Grafana only | also firewall secrets and API keys (optional) |
+| Grafana | 11.1.4 | 13.2.2 |
+| InfluxDB port | `0.0.0.0:8086` | `127.0.0.1:8086` |
+| SNMP polling | one instance per firewall, 20 s | fast 20 s instance plus slow 60 s instance |
+| Dashboards | three SNMP dashboards | the same three (improved) plus two API dashboards |
+
+The upgrade keeps your inventory, history, and Grafana users. Plan a few minutes of monitoring gap while images are rebuilt and containers recreated.
+
+### 1. Check the Prerequisites
+
+```bash
+docker compose version    # must be v2.24.0 or later
+```
+
+Older Compose plugins reject the optional `env_file` entry used by the Telegraf service; update the `docker-compose-plugin` package first. The host needs outbound HTTPS to pull `grafana/grafana:13.2.2`, `telegraf:1.40.1-alpine`, and `debian:bookworm-slim`.
+
+### 2. Back Up
+
+From the existing project directory:
+
+```bash
+BACKUP=../fw-monitoring-backup-$(date +%Y%m%d)
+install -d -m 700 "$BACKUP"
+git rev-parse HEAD > "$BACKUP/previous-commit.txt"
+docker compose stop
+sudo cp -a .env firewalls.yml influxdb-data grafana-data "$BACKUP"/
+```
+
+Stopping the stack gives a consistent copy of `influxdb-data/` (history) and `grafana-data/` (users, preferences, Grafana database). `sudo` is needed because these directories belong to container users. The backup is required for a rollback: once Grafana 13 has migrated its database, Grafana 11.1.4 cannot use it. Keep the backup private; it contains credentials.
+
+You can leave the stack stopped; step 5 starts it again.
+
+### 3. Update the Project Files
+
+For a Git checkout:
+
+```bash
+git status --short
+git fetch --tags
+git pull --ff-only
+```
+
+If the checkout is on the detached `v1.0.2` tag, switch to `main` first (`git switch main`), then pull. `.env`, `firewalls.yml`, `influxdb-data/`, and `grafana-data/` are ignored by Git and stay in place. Do not replace `firewalls.yml` with `firewalls_example.yml`.
+
+For an archive-based installation, extract the new release into a new directory and copy `.env`, `firewalls.yml`, `influxdb-data/`, and `grafana-data/` into it with `sudo cp -a`, then work from the new directory.
+
+### 4. Keep or Migrate the Inventory Secrets
+
+Your v1.0.2 `firewalls.yml` is still valid as is: direct values remain supported, and `.env` needs no new variable. After the upgrade, the secrets are no longer copied into `telegraf.conf` in either case.
+
+To move the secrets out of `firewalls.yml` (recommended), replace each value with a `${VARIABLE}` reference and define the variable in `.env`.
+
+Before (v1.0.2 style):
+
+```yaml
+- hostname: PA-440
+  host: 192.0.2.101
+  vendor: paloalto
+  snmp_version: 3
+  username: fwmon
+  auth_protocol: sha256
+  auth_password: CHANGE_ME_AUTH_PASSWORD
+  priv_protocol: aes256
+  priv_password: CHANGE_ME_PRIV_PASSWORD
+
+- hostname: FGT-80F
+  host: 192.0.2.102
+  vendor: fortinet
+  snmp_version: 2
+  community: CHANGE_ME_COMMUNITY
+```
+
+After, in `firewalls.yml`:
+
+```yaml
+- hostname: PA-440
+  host: 192.0.2.101
+  vendor: paloalto
+  snmp_version: 3
+  username: fwmon
+  auth_protocol: sha256
+  auth_password: ${PA_440_SNMP_AUTH}
+  priv_protocol: aes256
+  priv_password: ${PA_440_SNMP_PRIV}
+
+- hostname: FGT-80F
+  host: 192.0.2.102
+  vendor: fortinet
+  snmp_version: 2
+  community: ${FGT_80F_SNMP_COMMUNITY}
+```
+
+And appended to `.env`:
+
+```dotenv
+PA_440_SNMP_AUTH=CHANGE_ME_AUTH_PASSWORD
+PA_440_SNMP_PRIV=CHANGE_ME_PRIV_PASSWORD
+FGT_80F_SNMP_COMMUNITY=CHANGE_ME_COMMUNITY
+```
+
+Variable names are free (letters, digits, `_`), but each reference must be the whole value. The generator reads `.env` values literally and strips one pair of surrounding quotes. Docker Compose also reads `.env` and expands `$` in unquoted values, so wrap a secret that contains `$` in single quotes: `PA_440_SNMP_AUTH='CHANGE_ME$AUTH'`.
+
+Do not add advanced overrides such as `chassis` unless you already needed them in v1.0.2. The only new one worth knowing is `pa_cluster: true`, for PA-cluster members that should keep polling the `pan_pa_cluster` table (see step 6).
+
+### 5. Regenerate and Start
+
+```bash
+./generate.sh
+```
+
+During this run the generator:
+
+- reinstalls the Python requirements in `.venv`;
+- builds the new Alpine-based Telegraf image; it keeps UID `999`, so the existing `logs/telegraf/` directory stays writable;
+- runs SNMP discovery with the credentials passed as `snmp.conf` on stdin, then rewrites `.firewalls.generated.yml` with credentials redacted (the v1.0.2 file contained them in clear text);
+- writes `telegraf/paloalto-api.env` (mode `0600`) with the SNMP secrets, even when no API monitoring is enabled, and `telegraf/paloalto-api.json` (an empty list without API monitoring);
+- regenerates `telegraf.conf` with two SNMP instances per firewall and `$FIREWALL_SNMP_*` references instead of credentials;
+- runs `docker compose up -d`, which pulls Grafana 13.2.2 and recreates InfluxDB (new port binding and healthcheck), Telegraf, and Grafana. Telegraf now starts only once InfluxDB reports healthy.
+
+### 6. What Changes After the Upgrade
+
+- **Grafana 11.1 to 13.2.** The first start migrates the Grafana database automatically and can take a minute; follow it with `docker compose logs -f grafana`. Users, the admin password, and preferences are kept. Provisioned dashboards are reloaded from the repository; if you edited them in the UI, those edits are replaced, so save personal variants under another name.
+- **New dashboards.** `Palo Alto API Performance Monitoring` and `Palo Alto API Chassis Monitoring` appear automatically through provisioning. They stay empty until API monitoring is enabled (step 8).
+- **InfluxDB is localhost-only.** Anything that connected to `http://<docker-host>:8086` from another machine (an external Grafana, a script, Chronograf) stops working. Use an SSH tunnel, or re-expose the port as described in [Security Notes](#security-notes).
+- **SNMP polling split.** Load data (CPU, RAM, sessions, CPS, interfaces, processors, VSYS, zones) still refreshes every 20 seconds. Global counters, storage, host-resource devices, ENTITY sensors and states (chassis), and Fortinet VDOM, hardware sensor, and HA member panels refresh every 60 seconds; at short time ranges their curves look stepped.
+- **Gated tables.** `pan_interfaces_cps` is now polled only when PAN-OS 10.2+ is discovered or declared, and `pan_pa_cluster` only with `pa_cluster: true` (it used to follow PAN-OS 11.2+). No provisioned dashboard reads these two tables.
+- **Chassis sensors.** `pan_entity_sensors` and `pan_entity_states` gain an `entity_name` tag, so new series start at upgrade time; older series stay unlabelled until retention removes them.
+- **Fortinet hardware sensors.** `fortinet_hw_sensors.value` is now written as a float instead of the raw string. InfluxDB rejects the new type in the shard that already holds strings, so these points are dropped, and Telegraf logs `field type conflict`, until the next shard group starts (at most 24 hours with the default 30-day retention). To get the data back immediately and discard that measurement's earlier history:
+
+  ```bash
+  docker compose exec influxdb influx delete --bucket firewalls \
+    --start 1970-01-01T00:00:00Z --stop "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --predicate '_measurement="fortinet_hw_sensors"'
+  ```
+
+### 7. Verify
+
+```bash
+docker compose ps                                  # three services, influxdb and grafana "healthy"
+docker compose images                              # grafana 13.2.2, telegraf built from 1.40.1-alpine
+grep -c 'FIREWALL_SNMP_' telegraf/telegraf.conf    # > 0: SNMP secrets are referenced, not written
+ls -l telegraf/paloalto-api.env .firewalls.generated.yml   # both -rw-------
+tail -50 logs/telegraf/telegraf.log                # no SNMP timeouts or authentication errors
+curl -s http://127.0.0.1:8086/health               # InfluxDB answers locally only
+```
+
+Then open Grafana, check the admin login, and open each SNMP dashboard for every hostname. Slow-instance panels fill after about one minute.
+
+### 8. Optional: Enable Palo Alto API Monitoring
+
+Do this as a second, separate change once SNMP runs normally:
+
+1. Create the API administrator and role on each Palo Alto firewall ([Palo Alto XML API Setup](#palo-alto-xml-api-setup)).
+2. Generate and store the key: `.venv/bin/python paloalto_api_key.py --hostname PA-440 --username fwmon-api`. Note that the helper rewrites `firewalls.yml` without comments and keeps the original as `firewalls.yml.bak`.
+3. Run `./generate.sh` again.
+4. Open `Palo Alto API Performance Monitoring` and select the hostname.
+
+### Rollback to v1.0.2
+
+Run from the project directory, with `BACKUP` set to the directory used in step 2:
+
+```bash
+docker compose down
+git switch --detach v1.0.2           # or: git checkout "$(cat "$BACKUP/previous-commit.txt")"
+sudo rm -rf grafana-data
+sudo cp -a "$BACKUP/grafana-data" "$BACKUP/.env" "$BACKUP/firewalls.yml" .
+./generate.sh
+```
+
+Restoring `grafana-data/` is mandatory because Grafana 11.1.4 cannot open a database migrated by Grafana 13. Keep the current `influxdb-data/` to preserve the metrics collected since the upgrade, or restore it from the backup as well (after `docker compose down`) if you want the exact previous state. If you keep it, the Fortinet sensor field type flips back to a string, with the same temporary conflict as described in step 6. After a rollback, `telegraf.conf` again contains clear-text SNMP credentials and InfluxDB listens on all interfaces, as in v1.0.2. For an archive-based installation, simply go back to the old directory and run `./generate.sh` there.
+
+## Upgrade from v1.1.0
+
+For installations made from the `v1.1.0` tag (Sep 2026). Follow the same steps as [Upgrade from v1.0.2](#upgrade-from-v102-snmp-only-may-2026): prerequisites, backup, `git pull --ff-only`, `./generate.sh`, verify. Your `firewalls.yml`, `.env`, and API keys stay valid. Differences to expect:
+
+- **API sensor fields are now always floats.** v1.1.0 wrote whole-number sensor readings (fan `rpm`, `min`, `max`, and sometimes temperature, watts, volts, amps, or value) as integers in `paloalto_api_sensors`. The collector now always writes floats, so InfluxDB can reject those fields with `field type conflict` until the next daily shard group (at most 24 hours with the default 30-day retention). To avoid waiting, delete the measurement's earlier history:
+
+  ```bash
+  docker compose exec influxdb influx delete --bucket firewalls \
+    --start 1970-01-01T00:00:00Z --stop "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --predicate '_measurement="paloalto_api_sensors"'
+  ```
+
+- **Runtime env file format.** `telegraf/paloalto-api.env` is regenerated automatically in the new double-quoted format; nothing to do. It now also carries the SNMP secrets, which v1.1.0 still wrote in clear text into `telegraf.conf`.
+- **`pa_cluster` gate.** v1.1.0 polled `pan_pa_cluster` on every PAN-OS 11.2+ firewall. It is now opt-in: add `pa_cluster: true` to the PA-cluster members that should keep that table.
+- **Dataplane CPU semantics.** Per-core `cpu_pct` is now the one-minute average from `resource-monitor minute last 1` (it was a one-second sample), and a new `cpu_max_pct` field holds the one-minute peak. Curves become smoother after the upgrade.
+- **Also new since v1.1.0:** Alpine Telegraf image, Grafana 13.2.2, InfluxDB on `127.0.0.1:8086`, the 20 s/60 s SNMP split, `fortinet_hw_sensors.value` as a float, and new optional API categories (ingress backlogs, logging, GlobalProtect, software, RAID) that switch themselves off on platforms that reject them. Each of these is described in the v1.0.2 section above.
 
 ## Upgrade an Existing Installation
 
-Existing inventories remain compatible. If an entry has no `api_monitoring` block, API monitoring stays disabled and its SNMP behavior is unchanged. Configurations using the earlier `api_key_env` format also remain supported.
+Use this generic procedure for any other upgrade. Existing inventories remain compatible: without an `api_monitoring` block, API monitoring stays disabled and SNMP behavior is unchanged; the earlier `api_key_env` form is still supported. Always check `CHANGELOG.md` for behavior changes first.
 
 ### 1. Back Up the Local Configuration
 
-Run these commands from the existing project directory before updating it:
+Run these commands from the existing project directory:
 
 ```bash
 install -d -m 700 ../fw-monitoring-backup-YYYYMMDD
 cp -a firewalls.yml .env ../fw-monitoring-backup-YYYYMMDD/
 ```
 
-Replace `YYYYMMDD` with the upgrade date. Keeping the backup outside the repository prevents configuration copies containing secrets from appearing as untracked project files.
+Replace `YYYYMMDD` with the upgrade date. Keeping the backup outside the repository prevents copies containing secrets from appearing as untracked project files.
 
-For an important production installation, stop the stack and also copy `influxdb-data/` and `grafana-data/` into that protected backup directory before restarting it. They contain the monitoring history and Grafana state and are not regenerated from the YAML inventory. Keep all backups private because configuration and data directories can contain credentials or operational information.
+For a production installation, stop the stack and also copy `influxdb-data/` and `grafana-data/` (with `sudo cp -a`) into that protected directory. They contain the monitoring history and Grafana state and are not regenerated from the YAML inventory.
 
 ### 2. Update the Project Files
 
@@ -456,44 +820,42 @@ git status --short
 git pull --ff-only
 ```
 
-Review any local tracked-file changes before pulling. The normal local configuration files, `.env` and `firewalls.yml`, are ignored by Git and must remain in place. Do not replace `firewalls.yml` with `firewalls_example.yml`.
+Review any local tracked-file changes before pulling. `.env` and `firewalls.yml` are ignored by Git and must remain in place.
 
-For an archive-based installation, extract the new project release over a copy of the existing directory and restore the saved `.env` and `firewalls.yml` before running the generator. Preserve `influxdb-data/` and `grafana-data/` if the installation is moved to a new directory.
+For an archive-based installation, extract the new release over a copy of the existing directory and restore `.env`, `firewalls.yml`, `influxdb-data/`, and `grafana-data/` before running the generator.
 
 ### 3. Regenerate and Restart the Stack
-
-Always run the generator after an upgrade:
 
 ```bash
 ./generate.sh
 ```
 
-Do not use only `docker compose up -d`. The generator validates the existing inventory, recreates the Telegraf and API runtime files, downloads any required MIBs, rebuilds the Telegraf image, and starts or refreshes the stack. Existing InfluxDB history and Grafana state remain in their persistent data directories.
+Do not use only `docker compose up -d`. The generator validates the inventory, recreates the Telegraf and API runtime files, downloads any required MIBs, rebuilds the Telegraf image, and starts or refreshes the stack. InfluxDB history and Grafana state remain in their data directories.
 
 ### 4. Verify the Upgrade
 
 ```bash
 docker compose ps
 docker compose logs --tail=100 telegraf
+tail -100 logs/telegraf/telegraf.log
 ```
 
 Then open `http://<docker-host-ip>:3000`, open the relevant dashboard, and verify each configured hostname.
 
 ### 5. Enable API Monitoring Gradually
 
-The upgrade does not automatically enable API monitoring. Migrate Palo Alto firewalls one at a time:
+The upgrade never enables API monitoring by itself. Migrate Palo Alto firewalls one at a time:
 
-1. Add `api_monitoring` only to the Palo Alto firewalls you want to migrate.
-2. Generate missing keys with `paloalto_api_key.py`, or paste existing keys into the local inventory.
-3. Run `./generate.sh` again to recreate `telegraf/telegraf.conf`, `telegraf/paloalto-api.json`, and `telegraf/paloalto-api.env`.
-4. Check `docker compose ps` and `docker compose logs --tail=100 telegraf`.
-5. Open `Palo Alto API Performance Monitoring` in Grafana and select each migrated hostname.
+1. Add `api_monitoring` only to the Palo Alto firewalls you want to migrate, or let `paloalto_api_key.py` add it.
+2. Run `./generate.sh` again to recreate `telegraf/telegraf.conf`, `telegraf/paloalto-api.json`, and `telegraf/paloalto-api.env`.
+3. Check `docker compose ps` and the Telegraf log.
+4. Open `Palo Alto API Performance Monitoring` in Grafana and select each migrated hostname.
 
 ### Rollback
 
 To roll back only API monitoring without affecting SNMP, set `api_monitoring.enabled: false` or remove the block, then rerun `./generate.sh`.
 
-To roll back the local configuration, copy `.env` and `firewalls.yml` back from the protected backup directory, then rerun the generator. If the project code itself must also be rolled back, restore the previous release or Git tag first. Do not delete `influxdb-data/` or `grafana-data/` during a routine rollback.
+To roll back the local configuration, copy `.env` and `firewalls.yml` back from the backup directory and rerun the generator. If the project code must also be rolled back, restore the previous release or Git tag first; when the Grafana version changed, restore `grafana-data/` from the backup too. Do not delete `influxdb-data/` during a routine rollback.
 
 ## Palo Alto SNMP Setup
 
@@ -654,36 +1016,34 @@ Matching `firewalls.yml`:
 
 ## Discovery
 
-By default, the generator performs a best-effort SNMP discovery poll before rendering Telegraf.
+By default, the generator performs a best-effort SNMP discovery poll before rendering Telegraf. It runs `snmpget`/`snmpwalk` from the freshly built Telegraf image; the SNMP credentials are written as a Net-SNMP `snmp.conf` inside that throwaway container from stdin, never passed as command-line arguments.
 
 For Palo Alto, discovery records:
 
-- `sysDescr`
-- `sysObjectID`
-- PAN-OS version
+- `sysDescr` and `sysObjectID`
+- PAN-OS version, which drives the `panos_*_metrics`, `vsys_total_cps`, and `interface_utilization` flags
 - serial number
-- model when it can be parsed
+- model when it can be parsed, which drives the `chassis` flag
 - VSYS table presence
-- hardware/chassis profile when the model exposes it
 
 For Fortinet, discovery records:
 
-- `sysDescr`
-- `sysObjectID`
+- `sysDescr` and `sysObjectID`
 - FortiOS version
 - serial number
 - model when it can be parsed
 - VDOM table presence
 
-If a device is offline or credentials are wrong, generation continues with values declared in `firewalls.yml`.
+Discovered values take precedence over declared `panos_version` and `model` values, and flags are inferred again after discovery. Advanced overrides declared in `firewalls.yml` are never changed. If a device is offline or credentials are wrong, generation continues with the declared values.
 
-Disable discovery when needed:
+Disable discovery, or give slow firewalls more time (default 2 seconds per request, one retry):
 
 ```bash
 SNMP_DISCOVERY=false ./generate.sh
+SNMP_DISCOVERY_TIMEOUT=5 ./generate.sh
 ```
 
-If Palo Alto discovery cannot determine a PAN-OS version, the generator downloads the default Palo Alto MIB version `11-2`. Override it when needed:
+If no PAN-OS version is known, the generator downloads the default Palo Alto MIB version `11-2`. Override it when needed:
 
 ```bash
 PALO_MIB_VERSION=10-2 ./generate.sh
@@ -691,7 +1051,7 @@ PALO_MIB_VERSION=10-2 ./generate.sh
 
 ## Validate
 
-Every pull request and push to `main` runs GitHub Actions on Python 3.11 and 3.12. CI executes the unit tests with branch coverage, enforces a 75% project coverage floor, checks that generated dashboards are current, compiles all Python sources, validates `generate.sh` and Docker Compose, audits runtime and CI dependencies, scans tracked files for secrets and configuration problems, builds the custom Telegraf image, smoke-tests its unprivileged user and chassis MIB translations, and scans it for high or critical vulnerabilities. The image job reports every finding and blocks on vulnerabilities with an available fix. Any temporary exception must be scoped, justified, and dated in `.trivyignore.yaml` and `SECURITY.md`. The checks also run every Monday and can be started manually.
+Every pull request and push to `main` runs GitHub Actions on Python 3.11 and 3.12. CI executes the unit tests with branch coverage, enforces the 85% project coverage floor from `.coveragerc`, checks that generated dashboards are current, compiles all Python sources, validates `generate.sh` and Docker Compose, audits runtime and CI dependencies, scans tracked files for secrets and configuration problems, builds the custom Telegraf image, smoke-tests its unprivileged user and chassis MIB translations, and scans it for high or critical vulnerabilities. The image job reports every finding and blocks on vulnerabilities with an available fix. Any temporary exception must be scoped, justified, and dated in `.trivyignore.yaml` and `SECURITY.md`. The checks also run every Monday and can be started manually.
 
 Run the same core checks locally:
 
@@ -705,9 +1065,11 @@ docker compose config --quiet
 .venv/bin/pip-audit -r requirements-dev.txt
 ```
 
-The coverage threshold prevents large untested regressions, but the percentage is not treated as proof of correctness. Tests prioritize inventory and secret validation, API parsing, dashboard generation, SNMP discovery behavior, and stack orchestration.
+The two API dashboards are generated by `scripts/build_paloalto_api_dashboard.py`; edit the script, not the JSON files, and regenerate them.
 
-The Linux distribution reported by the container scanner is independent of the Docker host. The official Telegraf image used by this project is Debian-based, so an Ubuntu host correctly produces Debian findings for that image.
+The coverage threshold prevents large untested regressions, but the percentage is not treated as proof of correctness. Tests prioritize inventory and secret validation, API parsing, dashboard generation, SNMP template rendering, SNMP discovery behavior, and stack orchestration.
+
+The Linux distribution reported by the container scanner is independent of the Docker host: the Telegraf runtime image is Alpine-based, whatever distribution the host runs.
 
 After startup:
 
@@ -727,7 +1089,7 @@ tail -f logs/telegraf/telegraf.log
 docker compose logs --tail=100 telegraf
 ```
 
-Useful local SNMP checks from the Telegraf image:
+Manual SNMP checks from the Telegraf image. They place the credential on the command line (visible in `ps` and shell history), so use them only for one-off tests:
 
 ```bash
 docker compose run --rm telegraf snmpget -v2c -c CHANGE_ME_COMMUNITY 192.0.2.101 1.3.6.1.2.1.1.1.0
@@ -741,20 +1103,20 @@ docker compose run --rm telegraf snmpget -v3 -l authPriv -u fwmon -a SHA-256 -A 
 
 ## Generated Files
 
-These files/directories are generated locally and ignored by Git:
+These files and directories are local and ignored by Git:
 
-- `.env`
+- `.env` (mode `0600`)
 - `.venv/`
-- `firewalls.yml`
-- `firewalls_*.yml`
-- `.firewalls.generated.yml`
+- `firewalls.yml`, `firewalls_*.yml`, and the helper backup `firewalls.yml.bak`
+- `.firewalls.generated.yml` (mode `0600`, credentials redacted)
 - `logs/`
 - `telegraf/telegraf.conf`
 - `telegraf/paloalto-api.json`
-- `telegraf/paloalto-api.env`
+- `telegraf/paloalto-api.env` (mode `0600`)
 - `telegraf/mibs/paloalto/`
 - `grafana-data/`
 - `influxdb-data/`
+- `.coverage`, `coverage.xml`
 
 ## References
 

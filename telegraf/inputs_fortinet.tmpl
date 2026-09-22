@@ -1,44 +1,66 @@
-# --------------------------
-# File: inputs_fortinet.tmpl
-# --------------------------
+{#
+  inputs_fortinet.tmpl - Fortinet SNMP inputs (plain Jinja2).
 
-{{- range $fw := .firewalls }}
-{{- if eq $fw.vendor "fortinet" }}
-###############################################################################
-# {{$fw.hostname}} ({{$fw.host}}) - Fortinet
-###############################################################################
-[[inputs.snmp]]
-  agents = ["udp://{{ $fw.host }}:161"]
-  version = {{ $fw.snmp_version }}
+  Polling layout: every FortiGate gets TWO [[inputs.snmp]] instances that
+  share the same agent, credentials and [inputs.snmp.tags].
+
+  1. Fast instance, agent interval (20s), measurement name "fortinet_system":
+     fortinet_system scalars (CPU, memory, sessions, CPS, disk, HA mode),
+     interfaces and fortinet_processors.
+
+  2. Slow instance, interval = "60s": fortinet_vdoms, fortinet_hw_sensors and
+     fortinet_ha_members. Its only top-level field is the sysName.0 hostname
+     tag; a metric without fields is dropped by Telegraf, so this instance
+     never writes an extra fortinet_system point. The name is still set to
+     "fortinet_system" so any future scalar lands in the expected measurement.
+
+  Both instances use max_repetitions = 25 so each GETBULK round trip returns
+  more table rows. Measurement, field and tag names are part of the dashboard
+  contract: keep them unchanged.
+#}
+{% macro snmp_agent(fw) %}
+  agents = ["udp://{{ fw.host }}:161"]
+  version = {{ fw.snmp_version }}
   agent_host_tag = "source"
-  {{- if eq $fw.snmp_version 2 }}
-  community = "{{ $fw.community }}"
-  {{- else if eq $fw.snmp_version 3 }}
-  sec_name = "{{ $fw.username }}"
-  auth_protocol = "{{ $fw.telegraf_auth_protocol }}"
-  auth_password = "{{ $fw.auth_password }}"
-  priv_protocol = "{{ $fw.telegraf_priv_protocol }}"
-  priv_password = "{{ $fw.priv_password }}"
+  {% if fw.get('snmp_version') == 2 %}
+  community = "{{ fw.community }}"
+  {% elif fw.get('snmp_version') == 3 %}
+  sec_name = "{{ fw.username }}"
+  auth_protocol = "{{ fw.telegraf_auth_protocol }}"
+  auth_password = "{{ fw.auth_password }}"
+  priv_protocol = "{{ fw.telegraf_priv_protocol }}"
+  priv_password = "{{ fw.priv_password }}"
   sec_level = "authPriv"
-  {{- end }}
-
-  name = "fortinet_system"
-  timeout = "5s"
-  retries = 3
-
+  {% endif %}
+{%- endmacro %}
+{% macro snmp_tags(fw) %}
   [inputs.snmp.tags]
     vendor = "fortinet"
-    {{- if ($fw.cluster | default "") }}
-    cluster = "{{ $fw.cluster }}"
-    {{- end }}
-    {{- if ($fw.model | default "") }}
-    model = "{{ $fw.model }}"
-    {{- end }}
+    {% if fw.get('cluster') %}
+    cluster = "{{ fw.cluster }}"
+    {% endif %}
+    {% if fw.get('model') %}
+    model = "{{ fw.model }}"
+    {% endif %}
 
   [[inputs.snmp.field]]
     oid    = "RFC1213-MIB::sysName.0"
     name   = "hostname"
     is_tag = true
+{%- endmacro %}
+{% for fw in firewalls %}
+{% if fw.get('vendor') == 'fortinet' %}
+###############################################################################
+# {{ fw.hostname }} ({{ fw.host }}) - Fortinet - fast polling (agent interval)
+###############################################################################
+[[inputs.snmp]]
+{{ snmp_agent(fw) }}
+  name = "fortinet_system"
+  timeout = "5s"
+  retries = 3
+  max_repetitions = 25
+
+{{ snmp_tags(fw) }}
 
   [[inputs.snmp.field]]
     oid  = "RFC1213-MIB::sysUpTime.0"
@@ -90,11 +112,11 @@
   [[inputs.snmp.field]]
     oid  = "FORTINET-FORTIGATE-MIB::fgSysSesCount.0"
     name = "sessions_active"
-	
+
   # Connections per second (1 minute average)
   [[inputs.snmp.field]]
     oid  = "FORTINET-FORTIGATE-MIB::fgSysSesRate1.0"
-    name = "cps_1min_avg"	
+    name = "cps_1min_avg"
 
   [[inputs.snmp.field]]
     oid  = "FORTINET-FORTIGATE-MIB::fgSysSesRate10.0"
@@ -129,10 +151,11 @@
     name = "npu_cps_1min_avg"
 
   [[inputs.snmp.field]]
-    oid  = ".1.3.6.1.4.1.12356.101.13.1.1.0"
+    oid  = "FORTINET-FORTIGATE-MIB::fgHaSystemMode.0"
     name = "ha_mode"
 
-  # Standard IF-MIB interface table (64-bit counters)
+  # Standard IF-MIB interface table (64-bit counters, returned as unsigned
+  # integers without any conversion option).
   # Global throughput should be calculated from these interface
   # octet counters, not from NPU/dataplane feature counters.
   [[inputs.snmp.table]]
@@ -142,10 +165,12 @@
 
     [[inputs.snmp.table.field]]
       oid    = "IF-MIB::ifName"
+      name   = "ifName"
       is_tag = true
 
     [[inputs.snmp.table.field]]
       oid    = "IF-MIB::ifDescr"
+      name   = "ifDescr"
       is_tag = true
 
     [[inputs.snmp.table.field]]
@@ -159,44 +184,36 @@
       is_tag = true
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCInOctets"
-      name      = "ifHCInOctets"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCInOctets"
+      name = "ifHCInOctets"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCOutOctets"
-      name      = "ifHCOutOctets"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCOutOctets"
+      name = "ifHCOutOctets"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCInUcastPkts"
-      name      = "ifHCInUcastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCInUcastPkts"
+      name = "ifHCInUcastPkts"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCOutUcastPkts"
-      name      = "ifHCOutUcastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCOutUcastPkts"
+      name = "ifHCOutUcastPkts"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCInMulticastPkts"
-      name      = "ifHCInMulticastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCInMulticastPkts"
+      name = "ifHCInMulticastPkts"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCOutMulticastPkts"
-      name      = "ifHCOutMulticastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCOutMulticastPkts"
+      name = "ifHCOutMulticastPkts"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCInBroadcastPkts"
-      name      = "ifHCInBroadcastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCInBroadcastPkts"
+      name = "ifHCInBroadcastPkts"
 
     [[inputs.snmp.table.field]]
-      oid       = "IF-MIB::ifHCOutBroadcastPkts"
-      name      = "ifHCOutBroadcastPkts"
-      data_type = "counter64"
+      oid  = "IF-MIB::ifHCOutBroadcastPkts"
+      name = "ifHCOutBroadcastPkts"
 
     [[inputs.snmp.table.field]]
       oid  = "IF-MIB::ifHighSpeed"
@@ -225,6 +242,53 @@
     [[inputs.snmp.table.field]]
       oid  = "IF-MIB::ifOutDiscards"
       name = "ifOutDiscards"
+
+  [[inputs.snmp.table]]
+    name         = "fortinet_processors"
+    inherit_tags = ["hostname"]
+    oid          = "FORTINET-FORTIGATE-MIB::fgProcessorTable"
+    index_as_tag = true
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorUsage"
+      name = "cpu_pct_1min"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorUsage5sec"
+      name = "cpu_pct_5sec"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorContainedIn"
+      name = "contained_in"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorPktRxCount"
+      name = "pkt_rx"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorPktTxCount"
+      name = "pkt_tx"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorPktDroppedCount"
+      name = "pkt_dropped"
+
+    [[inputs.snmp.table.field]]
+      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorPktTxDroppedCount"
+      name = "pkt_tx_dropped"
+
+###############################################################################
+# {{ fw.hostname }} ({{ fw.host }}) - Fortinet - slow polling (60s)
+###############################################################################
+[[inputs.snmp]]
+{{ snmp_agent(fw) }}
+  name = "fortinet_system"
+  interval = "60s"
+  timeout = "5s"
+  retries = 2
+  max_repetitions = 25
+
+{{ snmp_tags(fw) }}
 
   [[inputs.snmp.table]]
     name         = "fortinet_vdoms"
@@ -262,44 +326,6 @@
       name = "cps"
 
   [[inputs.snmp.table]]
-    name         = "fortinet_processors"
-    inherit_tags = ["hostname"]
-    oid          = "FORTINET-FORTIGATE-MIB::fgProcessorTable"
-    index_as_tag = true
-
-    [[inputs.snmp.table.field]]
-      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorUsage"
-      name = "cpu_pct_1min"
-
-    [[inputs.snmp.table.field]]
-      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorUsage5sec"
-      name = "cpu_pct_5sec"
-
-    [[inputs.snmp.table.field]]
-      oid  = "FORTINET-FORTIGATE-MIB::fgProcessorContainedIn"
-      name = "contained_in"
-
-    [[inputs.snmp.table.field]]
-      oid       = "FORTINET-FORTIGATE-MIB::fgProcessorPktRxCount"
-      name      = "pkt_rx"
-      data_type = "counter64"
-
-    [[inputs.snmp.table.field]]
-      oid       = "FORTINET-FORTIGATE-MIB::fgProcessorPktTxCount"
-      name      = "pkt_tx"
-      data_type = "counter64"
-
-    [[inputs.snmp.table.field]]
-      oid       = "FORTINET-FORTIGATE-MIB::fgProcessorPktDroppedCount"
-      name      = "pkt_dropped"
-      data_type = "counter64"
-
-    [[inputs.snmp.table.field]]
-      oid       = "FORTINET-FORTIGATE-MIB::fgProcessorPktTxDroppedCount"
-      name      = "pkt_tx_dropped"
-      data_type = "counter64"
-
-  [[inputs.snmp.table]]
     name         = "fortinet_hw_sensors"
     inherit_tags = ["hostname"]
     oid          = "FORTINET-FORTIGATE-MIB::fgHwSensorTable"
@@ -311,8 +337,11 @@
       is_tag = true
 
     [[inputs.snmp.table.field]]
-      oid  = "FORTINET-FORTIGATE-MIB::fgHwSensorEntValue"
-      name = "value"
+      # fgHwSensorEntValue is a DisplayString; convert it so the value is
+      # stored as a number that dashboards can graph and threshold.
+      oid        = "FORTINET-FORTIGATE-MIB::fgHwSensorEntValue"
+      name       = "value"
+      conversion = "float"
 
     [[inputs.snmp.table.field]]
       oid  = "FORTINET-FORTIGATE-MIB::fgHwSensorEntAlarmStatus"
@@ -350,5 +379,5 @@
       oid  = "FORTINET-FORTIGATE-MIB::fgHaStatsSyncStatus"
       name = "sync_status"
 
-{{- end }}
-{{- end }}
+{% endif %}
+{% endfor %}

@@ -31,11 +31,11 @@ def generate_key(host: str, username: str, password: str, port: int, verify_tls:
     context = ssl.create_default_context() if verify_tls else ssl._create_unverified_context()  # noqa: SLF001
     with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
         root = ET.fromstring(response.read())
-    key = root.findtext("./result/key")
+    key = (root.findtext("./result/key") or "").strip()
     if root.attrib.get("status") != "success" or not key:
         message = " ".join(text.strip() for text in root.itertext() if text.strip())
         raise RuntimeError(message or "PAN-OS did not return an API key")
-    return key.strip()
+    return key
 
 
 def environment_name(hostname: str) -> str:

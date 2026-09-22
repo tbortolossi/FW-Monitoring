@@ -75,6 +75,7 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
     def test_both_dashboards_share_snmp_parity_sections(self):
         expected = {
             "HA Role Changes",
+            "Logging and Management Health",
             "Interfaces",
             "Interface Errors / Discards",
             "VSYS ${vsys}",
@@ -116,6 +117,100 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
         self.assertIn('r.core != "average"', query)
         self.assertIn("fn: max", query)
 
+    @staticmethod
+    def _all_panels(dashboard):
+        stack = list(dashboard["panels"])
+        while stack:
+            panel = stack.pop()
+            stack.extend(panel.get("panels", []))
+            yield panel
+
+    def _panel(self, dashboard, title):
+        return next(panel for panel in self._all_panels(dashboard) if panel.get("title") == title)
+
+    def test_hottest_core_prefers_peak_with_average_fallback(self):
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            tile = self._panel(dashboard, "Hottest DP Core")["targets"][0]["query"]
+            self.assertIn("r._field =~ /^cpu_(max_)?pct$/", tile)
+            self.assertIn("fn: max", tile)
+            cpu_title = "CPU MP / DP" if dashboard is self.dashboard else "CPU MP / DP by Slot"
+            for title in (cpu_title, "CPU Summary - ${dataplane}"):
+                query = self._panel(dashboard, title)["targets"][0]["query"]
+                self.assertIn('r._field == "cpu_max_pct"', query)
+                self.assertIn("(peak)", query)
+                self.assertIn('r._field == "cpu_pct"', query)
+
+    def test_overview_shows_ingress_backlog(self):
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            panel = next(p for p in dashboard["panels"] if p.get("title") == "Ingress Backlog by Dataplane")
+            query = panel["targets"][0]["query"]
+            self.assertIn("paloalto_api_ingress_backlogs", query)
+            self.assertIn('r._field == "usage_pct"', query)
+            steps = [step["value"] for step in panel["fieldConfig"]["defaults"]["thresholds"]["steps"]]
+            self.assertEqual(steps, [None, 50, 80])
+
+    def test_logging_and_management_health_row(self):
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            rows = {panel["title"]: panel for panel in dashboard["panels"] if panel["type"] == "row"}
+            self.assertIn("Logging and Management Health", rows)
+            logging = rows["Logging and Management Health"]
+            self.assertTrue(logging["collapsed"])
+            panels = {panel["title"]: panel for panel in logging["panels"]}
+            expected = {
+                "Log Rate": ("paloalto_api_logging", "/_rate$/"),
+                "Logs Discarded (rate)": ("paloalto_api_logging", "derivative(unit: 1s, nonNegative: true)"),
+                "Processes Not Running": ("paloalto_api_software", 'r._field == "running"'),
+                "Management Processes Not Running": ("paloalto_api_software", 'r.running != "true"'),
+                "Content Versions": ("paloalto_api_system", "url_filtering_version"),
+                "GlobalProtect Users": ("paloalto_api_globalprotect", "r.gateway"),
+                "GP Users": ("paloalto_api_globalprotect", "current_users"),
+            }
+            for title, needles in expected.items():
+                self.assertIn(title, panels)
+                for needle in needles:
+                    self.assertIn(needle, panels[title]["targets"][0]["query"])
+            self.assertEqual(panels["Log Rate"]["fieldConfig"]["defaults"]["custom"]["axisLabel"], "logs/s")
+            self.assertTrue(panels["Log Rate"]["targets"][0]["query"].startswith('import "strings"'))
+            self.assertIn("/discard|dropped/", panels["Logs Discarded (rate)"]["targets"][0]["query"])
+        standard = {panel["title"] for panel in next(
+            p for p in self.dashboard["panels"] if p.get("title") == "Logging and Management Health")["panels"]}
+        chassis = {panel["title"] for panel in next(
+            p for p in self.chassis_dashboard["panels"] if p.get("title") == "Logging and Management Health")["panels"]}
+        self.assertIn("RAID", standard)
+        self.assertNotIn("RAID", chassis)
+
+    def test_chassis_raid_sits_in_slot_inventory(self):
+        rows = {panel["title"]: panel for panel in self.chassis_dashboard["panels"] if panel["type"] == "row"}
+        raid = next(panel for panel in rows["Chassis Slot Inventory"]["panels"] if panel["title"] == "RAID")
+        self.assertIn("paloalto_api_raid", raid["targets"][0]["query"])
+        healthy = next(item for item in raid["fieldConfig"]["overrides"] if item["matcher"]["options"] == "healthy")
+        self.assertIn("mappings", {prop["id"] for prop in healthy["properties"]})
+
+    def test_ha_row_shows_sync_and_link_monitoring(self):
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            rows = {panel["title"]: panel for panel in dashboard["panels"] if panel["type"] == "row"}
+            panels = {panel["title"]: panel for panel in rows["HA Role Changes"]["panels"]}
+            sync = panels["HA Synchronization"]["targets"][0]["query"]
+            links = panels["HA Links and Monitoring"]["targets"][0]["query"]
+            self.assertIn('pivot(rowKey: ["row"], columnKey: ["_field"]', sync)
+            self.assertIn("r._field !~ /^(ha1_status|", sync)
+            self.assertIn("r._field =~ /^(ha1_status|", links)
+            for field in ("ha2_status", "link_monitoring", "path_monitoring", "state_reason", "state_duration",
+                          "local_priority", "peer_priority", "preemptive"):
+                self.assertIn(field, links)
+
+    def test_top_level_panels_do_not_overlap(self):
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            groups = [dashboard["panels"]] + [panel["panels"] for panel in dashboard["panels"] if panel["type"] == "row"]
+            for panels in groups:
+                cells = set()
+                for panel in panels:
+                    grid = panel["gridPos"]
+                    self.assertLessEqual(grid["x"] + grid["w"], 24, panel["title"])
+                    area = {(x, y) for x in range(grid["x"], grid["x"] + grid["w"]) for y in range(grid["y"], grid["y"] + grid["h"])}
+                    self.assertFalse(cells & area, panel["title"])
+                    cells |= area
+
     def test_flux_queries_import_strings_when_used(self):
         stack = list(self.dashboard["panels"])
         while stack:
@@ -134,6 +229,7 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
         self.assertIn("paloalto_api_interfaces", serialized)
         self.assertIn("paloalto_api_dataplane_resources", serialized)
         self.assertNotIn("pan_system", serialized)
+        self.assertNotIn("pan_entity", serialized)
         self.assertNotIn("ifHCInOctets", serialized)
         self.assertNotIn("ifHCOutOctets", serialized)
 

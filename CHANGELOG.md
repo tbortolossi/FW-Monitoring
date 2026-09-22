@@ -2,10 +2,21 @@
 
 ## Unreleased
 
+Behavior changes to review before upgrading (see "Upgrade from v1.0.2" and "Upgrade from v1.1.0" in `README.md`):
+
+- API sensor fields `min`, `max`, `rpm` (and any other physical value that v1.1.0 wrote as an integer) and chassis power figures are now always floats; installations with existing `paloalto_api_sensors` data can see InfluxDB field-type conflicts until the next shard group or until that history is deleted.
+- `fortinet_hw_sensors.value` is now a float instead of a string, with the same temporary field-type conflict on existing installations.
+- The `pan_pa_cluster` table is polled only with the new operator flag `pa_cluster: true`; it no longer follows PAN-OS 11.2+ detection.
+- `pan_interfaces_cps` (`panIfTable`) is polled only when PAN-OS 10.2+ is discovered or declared (`panos_10_2_metrics`).
+- SNMP polling uses a second 60-second instance per firewall; global counters, storage, host-resource devices, ENTITY tables, Fortinet VDOMs, hardware sensors, and HA members refresh every minute instead of every 20 seconds.
+- InfluxDB is published on `127.0.0.1:8086` only.
+- Grafana is upgraded from 11.1.4 to 13.2.2; its database migrates automatically on first start and cannot be opened again by 11.1.4.
+- Docker Compose v2.24 or later is required (optional `env_file` entry).
+
 ### Added
 
-- GitHub Actions CI for Python 3.11/3.12 tests, 75% branch-coverage enforcement, generated-dashboard drift detection, Compose validation, dependency auditing, repository secret/misconfiguration scanning, container builds, full image vulnerability reporting, and blocking of fixable high/critical findings.
-- Unit coverage for generator validation, normalization, SNMP discovery, rendering, and stack orchestration, plus Dependabot update configuration.
+- GitHub Actions CI for Python 3.11/3.12 tests, 85% branch-coverage enforcement, generated-dashboard drift detection, Compose validation, dependency auditing, repository secret/misconfiguration scanning, container builds, full image vulnerability reporting, and blocking of fixable high/critical findings.
+- Unit coverage for generator validation, normalization, SNMP discovery, template rendering, dashboard provisioning, collector runtime, and stack orchestration, plus Dependabot update configuration.
 - `${VARIABLE}` references in `firewalls.yml`, resolved from `.env` or the process environment, with environment storage now the API-key helper default.
 - Interactive Palo Alto inventory selection in the API-key helper, with automatic reuse of declared API hosts and preservation of existing polling settings.
 - Dedicated API-only Palo Alto chassis dashboard for slot inventory and live state, chassis power, environmental sensors, interfaces, and repeated per-dataplane details.
@@ -15,11 +26,42 @@
 - API dashboards now match the SNMP dashboards: the chassis API dashboard includes the full main view (sessions, CPS, session utilization, and repeated per-interface throughput and error panels), and both dashboards include per-VSYS sections (sessions and throughput by zone) and curated policy-deny, DoS, zone-protection, SYN-cookie, and block-table panels.
 - API current-load strip with thresholds, a hottest-core line per dataplane, an active-core CPU summary and per-core load map, a link-utilization table, worst-dataplane resource pressure, global drop rate by category, and a top-counters table with PAN-OS descriptions.
 - API collection of per-VSYS sessions (`show session meter`), logical interface counters tagged with zone and VSYS (throughput and per-reason drops), hardware port transmit errors and link-down counts, DoS-aspect global counters, and HA peer state and configuration/session synchronization.
-- Optional API commands that a platform rejects are disabled for that firewall after the first failure instead of being logged on every poll.
+- Optional API commands that a platform rejects, or that the API administrator role is not authorized to run, are disabled for that firewall after the first failure instead of being logged on every poll.
+- New optional API categories, each disabled automatically on platforms that reject it: `ingress_backlogs` (`show running resource-monitor ingress-backlogs`, per-dataplane usage and session count), `logging` (`debug log-receiver statistics`, log rates and discarded counters), `globalprotect` (gateway user counts), `software` (`show system software status`, per-process running state), and `raid` (`show system raid detail`, high-end and chassis models only).
+- API per-core dataplane peak `cpu_max_pct` next to `cpu_pct`.
+- Extra API HA fields (HA1/HA2 link status, link and path monitoring, local and peer priority, preemption, state reason and duration) and system-info fields (App-ID, Threat, antivirus, WildFire and URL-filtering content versions, device certificate status, operational mode, multi-VSYS, family).
+- API dashboards: "Ingress Backlog by Dataplane" overview panel, a collapsed "Logging and Management Health" row (log rate, logs discarded, content versions, processes not running, GlobalProtect users, RAID), an "HA Links and Monitoring" table, and the one-minute peak in the hottest-core series.
+- API chassis dashboard: RAID state in the slot inventory row.
+- Generator flags `panos_10_2_metrics` (inferred from PAN-OS 10.2+) and `pa_cluster` (operator-only, default `false`), documented with the other advanced overrides in `firewalls_example.yml` and `README.md`.
+- `SNMP_DISCOVERY_TIMEOUT` environment override for the discovery timeout (default 2 seconds, one retry).
+- Healthchecks for InfluxDB and Grafana; Telegraf starts only after InfluxDB is healthy.
+- ADR 0002 describing the SNMP fast/slow instances, the GET-based global counters, the `snmp.conf` discovery, and the runtime env-file encoding.
+
+### Changed
+
+- API dashboards: the current-load tiles now carry a 30-minute sparkline, the CPU, RAM, session-utilization, resource-pressure and per-core panels draw dashed 70/90% guide lines, the global drop rate is stacked by category, and the environmental section is split into temperature, fan, power and alarm panels on both API dashboards.
+- API chassis dashboard: new uncollapsed chassis health strip (cards up / not up, power budget used, hottest sensor, sensor alarms, slowest fan) and a colored per-slot state timeline directly under the load strip.
+- SNMP Palo Alto chassis dashboard: ENTITY-SENSOR values are scaled with `entPhySensorScale`/`entPhySensorPrecision`, split into temperature, fan and voltage/current/power panels, and labelled with the new `entity_name` tag; the blade device status table pivots status and error counts into columns with MIB-accurate colors (running green, warning orange, down red).
+- API per-core dataplane CPU now reads `show running resource-monitor minute last 1` (one-minute average) instead of a one-second sample.
+- SNMP templates: two `[[inputs.snmp]]` instances per firewall. The fast instance (20 s) keeps `pan_system`/`fortinet_system` scalars, interfaces, processors, VSYS, zones, `pan_interfaces_cps`, and `pan_interface_utilization`; the slow instance (60 s) holds the PAN-OS global counters, now fetched as scalar GET fields instead of one walk per counter, plus `pan_hr_storage`, `pan_hr_devices`, `pan_pa_cluster`, and the chassis ENTITY tables (Fortinet: VDOMs, hardware sensors, HA members). Both use `max_repetitions = 25`. Measurement, field, and tag names are unchanged.
+- `pan_entity_sensors` and `pan_entity_states` gain an `entity_name` tag; `fortinet_hw_sensors.value` is converted to a float; unused `data_type` lines are removed and the templates are plain Jinja2.
+- `.firewalls.generated.yml` flags are re-inferred after SNMP discovery while values declared in `firewalls.yml` are preserved, so the discovered model and version now drive `chassis`, `pan_entity_ext`, and the version flags.
+- `telegraf/paloalto-api.env` values are double-quoted with `\\`, `\"`, and `\$` escapes so they round-trip exactly through Docker Compose; the collector's `--env-file` loader accepts this format and the legacy single-quoted one.
+- Grafana is pinned to 13.2.2 (from 11.1.4), with the compatibility rationale documented in `docker-compose.yaml`.
+- The generator configures its log file only when run as a script, not at import time.
+- `grafana-data/` and `logs/telegraf/` permissions are widened only when the container user cannot already write; without root, the generator warns and suggests `sudo chown -R 472:472 grafana-data`.
+- `.coverage` and `coverage.xml` are ignored by Git.
 
 ### Fixed
 
-- API environmental sensor values now always use floating-point fields, preventing InfluxDB integer/float type conflicts when PAN-OS changes numeric formatting between polls.
+- SNMP Palo Alto storage and packet-buffer usage panels fall back to `hrStorageUsed / hrStorageSize` when `panhrStorageUsage` is unavailable (PAN-OS before 11.2 or `panos_11_2_metrics: false`) and use a 0-100% axis.
+- Fortinet "CPU Per Processor" no longer averages the 1-minute and 5-second series under one label; it plots the 1-minute value per processor.
+- Fortinet "Disk / Low Memory" converts MB and KB fields to bytes so both pairs share one axis; the HA role timeline uses the FortiOS primary/secondary/standalone wording and keeps standalone units.
+- Interface error/discard and drop-rate panels use packets per second instead of `ops` on every dashboard.
+- Every API physical sensor value (temperature, fan RPM, watts, volts, amps, value, min, max) and chassis power figure is now always a float, preventing InfluxDB integer/float type conflicts when PAN-OS changes numeric formatting between polls.
+- The API sessions parser honors alias priority (for example `num-active` over `num-installed`) regardless of XML element order.
+- The API HA group identifier is read from `group-id` instead of the `group` container element.
+- Chassis detection works on first install: flags inferred before discovery are recomputed once SNMP discovery has found the real model.
 - Palo Alto SNMP HA history now keeps standalone devices as a valid time series instead of producing an empty Grafana timeline error.
 - Explicit Palo Alto metric-table overrides are preserved during version enrichment, allowing problematic optional walks to be disabled without losing PAN-OS capability detection.
 
@@ -27,6 +69,9 @@
 
 - Updated the custom collector base image from Telegraf 1.32 to 1.40.1 so CI can gate current OS and Go dependency vulnerabilities.
 - Generated enriched inventory now redacts SNMP and API credentials and uses mode `0600`; the protected Telegraf runtime environment contains only required monitoring secrets, generated `telegraf.conf` no longer contains clear-text SNMP credentials, and `.env` is automatically restricted to mode `0600`.
+- SNMP discovery credentials are piped to the discovery container as a Net-SNMP `snmp.conf` on stdin instead of command-line arguments, so they no longer appear in `ps`, `docker inspect`, or audit logs.
+- InfluxDB is published on `127.0.0.1:8086` only; Grafana and Telegraf keep using the Compose network.
+- Grafana 13.2.2 replaces the unsupported 11.1.4 release (affected by later CVEs, including CVE-2026-27876); self sign-up, usage reporting, and update checks are disabled.
 - Added a security policy and a scoped, expiring risk acceptance for the gRPC-Go denial-of-service finding embedded in the latest Telegraf release; the shipped stack exposes no gRPC listener.
 - The custom Telegraf image now declares its unprivileged runtime user explicitly and no longer installs the unnecessary `nano` package.
 - Replaced the Debian-based Telegraf runtime with the official Alpine 3.23 variant. Standard IANA/IETF MIB text files are retained through a build-only stage, reducing the runtime HIGH/CRITICAL scan from 126 findings to the single documented upstream gRPC-Go finding; CI now smoke-tests the runtime UID and chassis MIB translations.

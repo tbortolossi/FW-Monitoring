@@ -5,8 +5,15 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest import mock
 
+import urllib.error
+
 from telegraf.paloalto_api_collector import (
+    CATEGORY_SCHEDULES,
+    DATAPLANE_COMMAND,
+    OPTIONAL_CATEGORIES,
     ApiError,
+    _first_number,
+    _result,
     collect_firewall,
     line_protocol,
     load_environment_file,
@@ -28,7 +35,13 @@ from telegraf.paloalto_api_collector import (
     parse_sessions,
     parse_storage,
     parse_system_info,
+    parse_globalprotect,
+    parse_ingress_backlogs,
+    parse_log_receiver,
+    parse_raid,
+    parse_software_status,
     request_xml,
+    run_once,
 )
 
 
@@ -122,14 +135,52 @@ class CollectorParsingTests(unittest.TestCase):
 
     def test_dataplane_cpu_ignores_maximum_table(self):
         result = ET.fromstring(
-            "<result><data-processors><dp0><second>"
+            "<result><data-processors><dp0><minute>"
             "<cpu-load-average><entry><coreid>0</coreid><value>12</value></entry></cpu-load-average>"
             "<cpu-load-maximum><entry><coreid>0</coreid><value>99</value></entry></cpu-load-maximum>"
-            "</second></dp0></data-processors></result>"
+            "</minute></dp0></data-processors></result>"
         )
-        indexed = {(tags["dataplane"], tags["core"]): fields["cpu_pct"] for tags, fields in parse_dataplane_resources(result)}
-        self.assertEqual(indexed[("dp0", "0")], 12.0)
-        self.assertEqual(indexed[("dp0", "average")], 12.0)
+        indexed = {(tags["dataplane"], tags["core"]): fields for tags, fields in parse_dataplane_resources(result)}
+        # The maximum is stored separately and never mixed into cpu_pct.
+        self.assertEqual(indexed[("dp0", "0")], {"cpu_pct": 12.0, "cpu_max_pct": 99.0})
+        self.assertEqual(indexed[("dp0", "average")], {"cpu_pct": 12.0, "cpu_max_pct": 99.0})
+
+    def test_dataplane_average_point_uses_mean_of_averages_and_max_of_maxima(self):
+        result = ET.fromstring(
+            "<result><data-processors><s1dp0><minute>"
+            "<cpu-load-average><entry><coreid>0</coreid><value>10</value></entry>"
+            "<entry><coreid>1</coreid><value>30</value></entry></cpu-load-average>"
+            "<cpu-load-maximum><entry><coreid>0</coreid><value>55</value></entry>"
+            "<entry><coreid>1</coreid><value>80</value></entry></cpu-load-maximum>"
+            "</minute></s1dp0></data-processors></result>"
+        )
+        indexed = {(tags["dataplane"], tags["core"]): fields for tags, fields in parse_dataplane_resources(result)}
+        self.assertEqual(indexed[("s1dp0", "1")], {"cpu_pct": 30.0, "cpu_max_pct": 80.0})
+        self.assertEqual(indexed[("s1dp0", "average")], {"cpu_pct": 20.0, "cpu_max_pct": 80.0})
+        line = line_protocol("m", {}, indexed[("s1dp0", "average")])
+        self.assertEqual(line, "m cpu_max_pct=80.0,cpu_pct=20.0")
+
+    def test_dataplane_command_reads_last_minute(self):
+        self.assertIn("<minute><last>1</last></minute>", DATAPLANE_COMMAND)
+
+    def test_dataplane_poll_records_names_for_ingress_backlogs(self):
+        config = {"hostname": "fw", "host": "192.0.2.1", "api_key_env": "KEY"}
+        dataplane = ET.fromstring(
+            "<result><data-processors><dp0><minute><cpu-load-average>"
+            "<entry><coreid>0</coreid><value>5</value></entry></cpu-load-average>"
+            "</minute></dp0><dp1><minute><cpu-load-average>"
+            "<entry><coreid>0</coreid><value>7</value></entry></cpu-load-average>"
+            "</minute></dp1></data-processors></result>"
+        )
+        backlog = ET.fromstring("<result>none</result>")
+        with mock.patch(
+            "telegraf.paloalto_api_collector.request_xml",
+            side_effect=lambda _config, command: backlog if "ingress-backlogs" in command else dataplane,
+        ):
+            lines = collect_firewall(config, {"dataplane", "ingress_backlogs"})
+        self.assertEqual(config["_dataplanes"], ["dp0", "dp1"])
+        self.assertIn("paloalto_api_ingress_backlogs,dataplane=dp0,hostname=fw sessions=0i,usage_pct=0.0", lines)
+        self.assertIn("paloalto_api_ingress_backlogs,dataplane=dp1,hostname=fw sessions=0i,usage_pct=0.0", lines)
 
     def test_dataplane_name_can_be_an_entry_attribute(self):
         result = ET.fromstring(
@@ -336,6 +387,17 @@ class CollectorParsingTests(unittest.TestCase):
         self.assertEqual(request.call_count, 1)
         self.assertIn("vsys", config["_unsupported"])
 
+    def test_optional_command_refused_by_role_is_disabled_after_first_failure(self):
+        config = {"hostname": "vm", "host": "192.0.2.1", "api_key_env": "KEY"}
+        with mock.patch(
+            "telegraf.paloalto_api_collector.request_xml",
+            side_effect=ApiError("You are not authorized to perform this operation"),
+        ) as request, mock.patch("sys.stderr"):
+            collect_firewall(config, {"logging"})
+            collect_firewall(config, {"logging"})
+        self.assertEqual(request.call_count, 1)
+        self.assertIn("logging", config["_unsupported"])
+
     def test_ha_state_includes_peer_and_sync(self):
         result = ET.fromstring(
             "<result><enabled>yes</enabled><group><mode>Active-Passive</mode>"
@@ -382,14 +444,41 @@ class CollectorParsingTests(unittest.TestCase):
             [
                 (
                     {"sensor_type": "thermal", "slot": "1", "description": "CPU"},
-                    {"degrees_c": 42.0, "min": 5, "max": 90, "alarm": "False"},
+                    {"degrees_c": 42.0, "min": 5.0, "max": 90.0, "alarm": "False"},
                 )
             ],
         )
-        self.assertIsInstance(
-            parse_environmentals(result, "thermal")[0][1]["degrees_c"],
-            float,
-        )
+        # Every physical value is a float so the InfluxDB field type is stable.
+        for name in ("degrees_c", "min", "max"):
+            self.assertIsInstance(parse_environmentals(result, "thermal")[0][1][name], float)
+
+    def test_physical_values_keep_the_same_line_protocol_type(self):
+        def power_line(volts, watts):
+            result = ET.fromstring(
+                f"<result><power><entry><slot>1</slot><description>PSU</description>"
+                f"<Volts>{volts}</Volts><Watts>{watts}</Watts><RPMs>{volts}</RPMs></entry></power></result>"
+            )
+            tags, fields = parse_environmentals(result, "power")[0]
+            return line_protocol("paloalto_api_sensors", tags, fields)
+
+        integer, decimal = power_line("12", "300"), power_line("12.5", "300.5")
+        self.assertIn("volts=12.0", integer)
+        self.assertIn("watts=300.0", integer)
+        self.assertIn("rpm=12.0", integer)
+        self.assertIn("volts=12.5", decimal)
+        self.assertNotRegex(integer, r"=\d+i")
+        self.assertNotRegex(decimal, r"=\d+i")
+
+        def chassis_line(power):
+            result = ET.fromstring(
+                f'<result><slots><entry name="s1"><component>NC</component><power>{power}</power></entry></slots>'
+                f"<summary><provided>{power}</provided></summary></result>"
+            )
+            return [line_protocol("m", tags, fields) for tags, fields in parse_chassis_power(result)]
+
+        self.assertIn("power_w=350.0", chassis_line("350")[0])
+        self.assertIn("power_w=350.5", chassis_line("350.5")[0])
+        self.assertIn("provided_w=350.0", chassis_line("350")[1])
 
     def test_chassis_inventory_exposes_slots_and_card_types(self):
         result = ET.fromstring(
@@ -412,8 +501,9 @@ class CollectorParsingTests(unittest.TestCase):
         )
         self.assertEqual(
             parse_chassis_power(result)[0],
-            ({"slot": "s1", "component": "PA-7500-NC-A"}, {"status": "Up", "power_w": 350}),
+            ({"slot": "s1", "component": "PA-7500-NC-A"}, {"status": "Up", "power_w": 350.0}),
         )
+        self.assertIsInstance(parse_chassis_power(result)[0][1]["power_w"], float)
 
     def test_chassis_status_exposes_each_slot_state(self):
         result = ET.fromstring(
@@ -501,10 +591,293 @@ class CollectorParsingTests(unittest.TestCase):
     def test_generated_environment_file_can_be_loaded_for_host_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "api.env"
-            path.write_text("# generated\nPALO_KEY='secret-\\\\value\\'s'\n", encoding="utf-8")
+            path.write_text(
+                "# generated\n"
+                'PALO_KEY="pa\'ss\\\\wo\\"rd\\$x #=y "\n'
+                "LEGACY_KEY='secret-\\\\value\\'s'\n",
+                encoding="utf-8",
+            )
             with mock.patch.dict(os.environ, {}, clear=True):
                 load_environment_file(path)
-                self.assertEqual(os.environ["PALO_KEY"], "secret-\\value's")
+                self.assertEqual(os.environ["PALO_KEY"], "pa'ss\\wo\"rd$x #=y ")
+                self.assertEqual(os.environ["LEGACY_KEY"], "secret-\\value's")
+
+class NewCategoryTests(unittest.TestCase):
+    def test_sessions_active_prefers_num_active_over_earlier_num_installed(self):
+        result = ET.fromstring(
+            "<result><num-installed>987654</num-installed><num-max>1000</num-max>"
+            "<num-active>250</num-active></result>"
+        )
+        fields = parse_sessions(result)
+        self.assertEqual(fields["sessions_active"], 250)
+        self.assertEqual(fields["session_utilization_pct"], 25.0)
+
+    def test_first_number_falls_back_to_later_alias(self):
+        result = ET.fromstring("<result><num-installed>7</num-installed></result>")
+        self.assertEqual(_first_number(result, "num-active", "num-installed"), 7)
+
+    def test_system_info_extras(self):
+        result = ET.fromstring(
+            "<result><system><model>PA-5220</model><family>5200</family>"
+            "<app-version>8800-9000</app-version><threat-version>8800-9000</threat-version>"
+            "<av-version>4900-5400</av-version><wildfire-version>900000-904000</wildfire-version>"
+            "<url-filtering-version>20260101.20001</url-filtering-version><multi-vsys>on</multi-vsys>"
+            "<operational-mode>normal</operational-mode>"
+            "<device-certificate-status>Valid</device-certificate-status></system></result>"
+        )
+        fields = parse_system_info(result)
+        self.assertEqual(fields["app_version"], "8800-9000")
+        self.assertEqual(fields["threat_version"], "8800-9000")
+        self.assertEqual(fields["av_version"], "4900-5400")
+        self.assertEqual(fields["wildfire_version"], "900000-904000")
+        self.assertEqual(fields["url_filtering_version"], "20260101.20001")
+        self.assertEqual(fields["multi_vsys"], "on")
+        self.assertEqual(fields["operational_mode"], "normal")
+        self.assertEqual(fields["device_certificate_status"], "Valid")
+        self.assertEqual(fields["family"], "5200")
+
+    def test_ha_state_extras(self):
+        result = ET.fromstring(
+            "<result><enabled>yes</enabled><group><group-id>1</group-id><mode>Active-Passive</mode>"
+            "<local-info><state>active</state><state-reason>User requested</state-reason>"
+            "<state-duration>86400</state-duration><priority>100</priority><preemptive>no</preemptive>"
+            "<ha1><conn-status>up</conn-status></ha1><ha2><conn-status>up</conn-status></ha2></local-info>"
+            "<peer-info><state>passive</state><conn-status>up</conn-status><priority>110</priority></peer-info>"
+            "<link-monitoring><enabled>yes</enabled></link-monitoring>"
+            "<path-monitoring><enabled>no</enabled></path-monitoring>"
+            "<running-sync>synchronized</running-sync></group></result>"
+        )
+        fields = parse_ha_state(result)
+        self.assertEqual(fields["group"], "1")
+        self.assertEqual(fields["state"], "active")
+        self.assertEqual(fields["peer_state"], "passive")
+        self.assertEqual(fields["state_reason"], "User requested")
+        self.assertEqual(fields["state_duration"], "86400")
+        self.assertEqual(fields["ha1_status"], "up")
+        self.assertEqual(fields["ha2_status"], "up")
+        self.assertEqual(fields["link_monitoring"], "yes")
+        self.assertEqual(fields["path_monitoring"], "no")
+        self.assertEqual(fields["preemptive"], "no")
+        self.assertEqual(fields["local_priority"], 100)
+        self.assertEqual(fields["peer_priority"], 110)
+
+    def test_ingress_backlogs_text_with_dp_headers(self):
+        result = ET.fromstring(
+            "<result>-- SLOT: s1, DP: dp0 --\n"
+            "USAGE - ATOMIC: 92% TOTAL: 93%\n\n"
+            "TOP SESSIONS:\n"
+            "SESS-ID         PCT     GRP-ID  COUNT\n"
+            "6               92%     1       156\n"
+            "                        7       1732\n"
+            "88              4%      1       20\n\n"
+            "-- SLOT: s1, DP: dp1 --\n"
+            "USAGE - ATOMIC: 0% TOTAL: 0%\n</result>"
+        )
+        points = dict((tags["dataplane"], fields) for tags, fields in parse_ingress_backlogs(result, ["dp0", "dp1"]))
+        self.assertEqual(points["dp0"], {"usage_pct": 93.0, "sessions": 2})
+        self.assertEqual(points["dp1"], {"usage_pct": 0.0, "sessions": 0})
+
+    def test_ingress_backlogs_short_headers_keep_chassis_names(self):
+        result = ET.fromstring("<result>DP s1dp0\n12   40%   1   3\n-- DP s2dp1 --\n</result>")
+        points = dict((tags["dataplane"], fields) for tags, fields in parse_ingress_backlogs(result, ["s1dp0", "s2dp1", "s3dp0"]))
+        self.assertEqual(points["s1dp0"], {"usage_pct": 40.0, "sessions": 1})
+        self.assertEqual(points["s2dp1"], {"usage_pct": 0.0, "sessions": 0})
+        self.assertEqual(points["s3dp0"], {"usage_pct": 0.0, "sessions": 0})
+
+    def test_ingress_backlogs_empty_output_zero_fills_known_dataplanes(self):
+        for body in ("<result/>", "<result>none</result>"):
+            points = parse_ingress_backlogs(ET.fromstring(body), ["dp1", "dp0"])
+            self.assertEqual(
+                points,
+                [
+                    ({"dataplane": "dp0"}, {"usage_pct": 0.0, "sessions": 0}),
+                    ({"dataplane": "dp1"}, {"usage_pct": 0.0, "sessions": 0}),
+                ],
+            )
+        self.assertEqual(parse_ingress_backlogs(ET.fromstring("<result/>")), [])
+
+    def test_ingress_backlogs_xml_form(self):
+        result = ET.fromstring(
+            '<result><dp name="dp0"><entry><session-id>6</session-id><usage>55%</usage></entry>'
+            "<entry><session-id>7</session-id><usage>12</usage></entry></dp>"
+            '<dp name="dp1"/></result>'
+        )
+        points = dict((tags["dataplane"], fields) for tags, fields in parse_ingress_backlogs(result))
+        self.assertEqual(points["dp0"], {"usage_pct": 55.0, "sessions": 2})
+        self.assertEqual(points["dp1"], {"usage_pct": 0.0, "sessions": 0})
+
+    def test_log_receiver_statistics(self):
+        result = ET.fromstring(
+            "<result>Log incoming rate: 12/sec\n"
+            "Log written rate: 11.5/sec\n"
+            "Log forwarded rate: 0/sec\n"
+            "Traffic logs written: 99\n"
+            "Total logs discarded: 42\n"
+            "Logs discarded (queue full): 7\n"
+            "Logs dropped by filter: 3\n</result>"
+        )
+        self.assertEqual(
+            parse_log_receiver(result),
+            {
+                "log_incoming_rate": 12.0,
+                "log_written_rate": 11.5,
+                "log_forwarded_rate": 0.0,
+                "total_logs_discarded": 42,
+                "logs_discarded_queue_full": 7,
+                "logs_dropped_by_filter": 3,
+            },
+        )
+        long_label = "<result>" + "x" * 100 + " rate: 1/sec</result>"
+        (name,) = parse_log_receiver(ET.fromstring(long_label))
+        self.assertLessEqual(len(name), 64)
+        self.assertTrue(name.endswith("_rate"))
+
+    def test_globalprotect_statistics(self):
+        result = ET.fromstring(
+            "<result><Gateway><entry><name>gw-a</name><CurrentUsers>5</CurrentUsers>"
+            "<PreviousUsers>2</PreviousUsers></entry><entry><name>gw b</name>"
+            "<CurrentUsers>1</CurrentUsers><PreviousUsers>0</PreviousUsers></entry></Gateway>"
+            "<TotalCurrentUsers>6</TotalCurrentUsers><TotalPreviousUsers>2</TotalPreviousUsers></result>"
+        )
+        self.assertEqual(
+            parse_globalprotect(result),
+            [
+                ({}, {"current_users": 6, "previous_users": 2}),
+                ({"gateway": "gw-a"}, {"current_users": 5, "previous_users": 2}),
+                ({"gateway": "gw b"}, {"current_users": 1, "previous_users": 0}),
+            ],
+        )
+
+    def test_software_status(self):
+        result = ET.fromstring(
+            "<result>Slot 1, Role mgmt\n"
+            "-----------------\n"
+            "Process: devsrvr    (pid: 1234)  running\n"
+            "Process sysdagent      running    (pid: 3043)\n"
+            "Process crashy         exited     (pid: 0)\n"
+            "mgmtsrvr: running\n"
+            "Role: mgmt\n</result>"
+        )
+        self.assertEqual(
+            parse_software_status(result),
+            [
+                ({"process": "crashy"}, {"running": False, "status": "exited"}),
+                ({"process": "devsrvr"}, {"running": True, "status": "running"}),
+                ({"process": "mgmtsrvr"}, {"running": True, "status": "running"}),
+                ({"process": "sysdagent"}, {"running": True, "status": "running"}),
+            ],
+        )
+
+    def test_raid_detail(self):
+        result = ET.fromstring(
+            "<result>Disk Pair A                           Available\n"
+            "    Status                     clean\n"
+            "    Disk id A1                           Present\n"
+            "        model        : ST1000NX0313\n"
+            "        status       : active sync\n"
+            "    Disk id A2                           Missing\n</result>"
+        )
+        self.assertEqual(
+            parse_raid(result),
+            [
+                ({"disk": "disk_a1"}, {"status": "Present", "healthy": True}),
+                ({"disk": "disk_a2"}, {"status": "Missing", "healthy": False}),
+                ({"disk": "disk_pair_a"}, {"status": "Available", "healthy": True}),
+                ({"disk": "disk_pair_a_array"}, {"status": "clean", "healthy": True}),
+            ],
+        )
+        simple = parse_raid(ET.fromstring("<result>Status: optimal\nDisk1: OK\nDisk2: failed</result>"))
+        self.assertEqual(
+            simple,
+            [
+                ({"disk": "array"}, {"status": "optimal", "healthy": True}),
+                ({"disk": "disk1"}, {"status": "OK", "healthy": True}),
+                ({"disk": "disk2"}, {"status": "failed", "healthy": False}),
+            ],
+        )
+
+    def test_raid_only_polled_on_highend_or_chassis(self):
+        responses = {
+            "PA-440": ET.fromstring("<result><system><model>PA-440</model></system></result>"),
+            "PA-5220": ET.fromstring("<result><system><model>PA-5220</model></system></result>"),
+        }
+        raid = ET.fromstring("<result>Disk1: OK</result>")
+        for model, expected_calls in (("PA-440", 1), ("PA-5220", 2)):
+            config = {"hostname": "fw", "host": "192.0.2.1", "api_key_env": "KEY"}
+            with mock.patch(
+                "telegraf.paloalto_api_collector.request_xml",
+                side_effect=lambda _config, command, model=model: raid if "<raid>" in command else responses[model],
+            ) as request:
+                lines = collect_firewall(config, {"system", "raid"})
+            self.assertEqual(request.call_count, expected_calls, model)
+        self.assertTrue(config["_is_highend"])
+        self.assertIn("paloalto_api_raid,disk=disk1,hostname=fw healthy=true,status=\"OK\"", lines)
+
+    def test_unsupported_new_category_is_disabled_without_affecting_others(self):
+        config = {"hostname": "fw", "host": "192.0.2.1", "api_key_env": "KEY"}
+        sessions = ET.fromstring("<result><num-active>5</num-active></result>")
+
+        def response_for(_config, command):
+            if "log-receiver" in command:
+                raise ApiError("debug -> log-receiver is unexpected")
+            if "global-protect" in command:
+                raise ApiError("GlobalProtect gateway not configured")
+            return sessions
+
+        with mock.patch(
+            "telegraf.paloalto_api_collector.request_xml", side_effect=response_for
+        ) as request, mock.patch("sys.stderr"):
+            first = collect_firewall(config, {"logging", "globalprotect", "sessions"})
+            second = collect_firewall(config, {"logging", "globalprotect", "sessions"})
+        self.assertEqual(request.call_count, 4)
+        self.assertEqual(config["_unsupported"], {"logging", "globalprotect"})
+        self.assertIn("paloalto_api_sessions,hostname=fw sessions_active=5i", first)
+        self.assertEqual(first, second)
+
+    def test_transient_failure_does_not_disable_optional_category(self):
+        config = {"hostname": "fw", "host": "192.0.2.1", "api_key_env": "KEY"}
+        with mock.patch(
+            "telegraf.paloalto_api_collector.request_xml",
+            side_effect=ApiError("request failed: timed out"),
+        ), mock.patch("sys.stderr"):
+            collect_firewall(config, {"software"})
+        self.assertNotIn("software", config["_unsupported"])
+
+    def test_schedules_are_the_single_source_of_truth(self):
+        for category in ("ingress_backlogs", "logging", "globalprotect", "software", "raid"):
+            self.assertIn(category, CATEGORY_SCHEDULES)
+            self.assertIn(category, OPTIONAL_CATEGORIES)
+        self.assertEqual(CATEGORY_SCHEDULES["raid"]({"system_interval": 900}), 900)
+        self.assertEqual(CATEGORY_SCHEDULES["ingress_backlogs"]({}), 60)
+        with mock.patch("telegraf.paloalto_api_collector.collect_firewall", return_value=[]) as collect:
+            run_once([{"hostname": "fw"}])
+        self.assertEqual(collect.call_args.args[1], set(CATEGORY_SCHEDULES))
+
+
+class ErrorPathTests(unittest.TestCase):
+    def test_result_error_status_raises_with_message(self):
+        root = ET.fromstring(
+            '<response status="error"><msg><line>show -> foo is unexpected</line></msg></response>'
+        )
+        with self.assertRaisesRegex(ApiError, "show -> foo is unexpected"):
+            _result(root)
+
+    def _urlopen_returning(self, payload: bytes):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = payload
+        return mock.patch("urllib.request.urlopen", return_value=response)
+
+    def test_request_xml_invalid_xml_raises_api_error(self):
+        with mock.patch.dict(os.environ, {"PAN_KEY": "k"}, clear=True), self._urlopen_returning(b"<html><body>"):
+            with self.assertRaisesRegex(ApiError, "invalid XML"):
+                request_xml({"host": "192.0.2.1", "api_key_env": "PAN_KEY"}, "<show/>")
+
+    def test_request_xml_url_error_raises_api_error(self):
+        with mock.patch.dict(os.environ, {"PAN_KEY": "k"}, clear=True), mock.patch(
+            "urllib.request.urlopen", side_effect=urllib.error.URLError("connection refused")
+        ):
+            with self.assertRaisesRegex(ApiError, "request failed: .*connection refused"):
+                request_xml({"host": "192.0.2.1", "api_key_env": "PAN_KEY"}, "<show/>")
 
 
 if __name__ == "__main__":

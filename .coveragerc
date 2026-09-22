@@ -7,7 +7,7 @@ source =
     telegraf.paloalto_api_collector
 
 [report]
-fail_under = 75
+fail_under = 85
 show_missing = True
 skip_empty = True
 

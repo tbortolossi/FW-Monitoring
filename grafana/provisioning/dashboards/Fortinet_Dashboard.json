@@ -184,7 +184,29 @@
             "lineWidth": 1,
             "fillOpacity": 8,
             "spanNulls": false,
-            "showPoints": "never"
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
           }
         },
         "overrides": []
@@ -219,12 +241,13 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_processors\" and r.hostname == \"${hostname}\" and (r._field == \"cpu_pct_1min\" or r._field == \"cpu_pct_5sec\"))\n  |> map(fn: (r) => ({ r with _field: \"CPU \" + r.index }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_processors\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct_1min\")\n  |> map(fn: (r) => ({ r with _field: \"CPU \" + r.index }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
           "refId": "A"
         }
       ],
       "title": "CPU Per Processor",
-      "type": "timeseries"
+      "type": "timeseries",
+      "description": "One-minute average load of every processor from fgProcessorTable (fgProcessorUsage1min). The previous version merged the 1-minute and 5-second series under the same label, which averaged them together. Dashed lines mark 70% and 90%."
     },
     {
       "datasource": {
@@ -465,7 +488,7 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "description": "HA role history. Expand this row when correlating CPU, sessions, or throughput with Active/Passive role changes. The query only returns Active/Passive samples, so standalone firewalls do not show a misleading HA timeline.",
+          "description": "HA role of each VDOM from fgVdEntHaState: primary, secondary or standalone. Wording matches the FortiOS HA status shown in the header.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -475,24 +498,44 @@
               },
               "mappings": [
                 {
+                  "type": "value",
                   "options": {
-                    "Active": {
+                    "Primary": {
                       "color": "green",
                       "index": 0,
-                      "text": "Active"
+                      "text": "Primary"
                     }
-                  },
-                  "type": "value"
+                  }
                 },
                 {
+                  "type": "value",
                   "options": {
-                    "Passive": {
+                    "Secondary": {
                       "color": "blue",
                       "index": 1,
-                      "text": "Passive"
+                      "text": "Secondary"
                     }
-                  },
-                  "type": "value"
+                  }
+                },
+                {
+                  "type": "value",
+                  "options": {
+                    "Standalone": {
+                      "color": "text",
+                      "index": 2,
+                      "text": "Standalone"
+                    }
+                  }
+                },
+                {
+                  "type": "value",
+                  "options": {
+                    "Unknown": {
+                      "color": "red",
+                      "index": 3,
+                      "text": "Unknown"
+                    }
+                  }
                 }
               ],
               "thresholds": {
@@ -535,7 +578,7 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_vdoms\" and r.hostname == \"${hostname}\" and r._field == \"ha_state\")\n  |> map(fn: (r) => ({ r with\n    _field: if exists r.vdom then r.vdom + \" HA role\" else \"HA role\",\n    _value: if r._value == 1 then \"Active\" else if r._value == 2 then \"Passive\" else \"\"\n  }))\n  |> filter(fn: (r) => r._value == \"Active\" or r._value == \"Passive\")\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_vdoms\" and r.hostname == \"${hostname}\" and r._field == \"ha_state\")\n  |> map(fn: (r) => ({ r with\n    _field: if exists r.vdom then r.vdom + \" HA role\" else \"HA role\",\n    _value: if r._value == 1 then \"Primary\" else if r._value == 2 then \"Secondary\" else if r._value == 3 then \"Standalone\" else \"Unknown\"\n  }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
@@ -637,7 +680,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "pps",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -837,7 +880,7 @@
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
+              "unit": "bytes",
               "custom": {
                 "drawStyle": "line",
                 "lineInterpolation": "linear",
@@ -879,12 +922,13 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and (r._field == \"disk_used_mb\" or r._field == \"disk_capacity_mb\" or r._field == \"lowmem_used_kb\" or r._field == \"lowmem_capacity_kb\"))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"fortinet_system\" and r.hostname == \"${hostname}\" and (r._field == \"disk_used_mb\" or r._field == \"disk_capacity_mb\" or r._field == \"lowmem_used_kb\" or r._field == \"lowmem_capacity_kb\"))\n  |> map(fn: (r) => ({ r with\n    _value: if r._field =~ /_mb$/ then float(v: r._value) * 1048576.0 else float(v: r._value) * 1024.0,\n    _field: if r._field == \"disk_used_mb\" then \"Disk used\" else if r._field == \"disk_capacity_mb\" then \"Disk capacity\" else if r._field == \"lowmem_used_kb\" then \"Low memory used\" else \"Low memory capacity\"\n  }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
           "title": "Disk / Low Memory",
-          "type": "timeseries"
+          "type": "timeseries",
+          "description": "Disk (fgSysDiskUsage / fgSysDiskCapacity, MB) and low memory (fgSysLowMemUsage / fgSysLowMemCapacity, KB) converted to bytes so both pairs share one axis."
         },
         {
           "datasource": {

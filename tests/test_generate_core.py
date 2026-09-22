@@ -1,5 +1,7 @@
+import os
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -107,6 +109,231 @@ class GeneratorCoreTests(unittest.TestCase):
         self.assertNotIn('name = "storage_usage_pct"', rendered)
         self.assertIn('name = "total_cps"', rendered)
 
+    def test_inventory_enrichment_recomputes_inferred_chassis_after_discovery(self):
+        firewall = {"hostname": "FW-CORE-01", "vendor": "paloalto"}
+        generate.enrich_inventory([firewall])
+        self.assertFalse(firewall["chassis"])
+        self.assertFalse(firewall["pan_entity_ext"])
+        firewall["model"] = "PA-7050"
+        firewall["panos_version"] = "11.1.4"
+        generate.enrich_inventory([firewall])
+        self.assertIs(firewall["chassis"], True)
+        self.assertIs(firewall["pan_entity_ext"], True)
+        self.assertEqual(firewall["chassis_family"], "pa7000")
+        self.assertTrue(firewall["panos_10_2_metrics"])
+        self.assertFalse(firewall["panos_11_2_metrics"])
+
+    def test_inventory_enrichment_keeps_operator_chassis_override_after_discovery(self):
+        firewall = {"hostname": "FW-CORE-01", "vendor": "paloalto", "chassis": False}
+        generate.enrich_inventory([firewall])
+        firewall["model"] = "PA-7050"
+        generate.enrich_inventory([firewall])
+        self.assertIs(firewall["chassis"], False)
+        self.assertIs(firewall["pan_entity_ext"], False)
+
+    def test_inventory_enrichment_recomputes_version_flags_after_discovery(self):
+        firewall = {"hostname": "PA", "vendor": "paloalto", "panos_version": "10.1.0", "panos_12_metrics": True}
+        generate.enrich_inventory([firewall])
+        self.assertFalse(firewall["panos_10_2_metrics"])
+        firewall["panos_version"] = "12.1.2"
+        generate.enrich_inventory([firewall])
+        self.assertTrue(firewall["panos_10_2_metrics"])
+        self.assertTrue(firewall["panos_11_2_metrics"])
+        self.assertTrue(firewall["panos_12_metrics"])
+
+    def test_panos_10_2_flag_and_pa_cluster_defaults(self):
+        firewalls = [
+            {"hostname": "OLD", "vendor": "paloalto", "panos_version": "10.1.9"},
+            {"hostname": "NEW", "vendor": "paloalto", "panos_version": "10.2.0"},
+            {"hostname": "OVR", "vendor": "paloalto", "panos_version": "11.2.1", "panos_10_2_metrics": False},
+            {"hostname": "CL", "vendor": "paloalto", "panos_version": "11.2.1", "pa_cluster": "yes"},
+            {"hostname": "NOVER", "vendor": "paloalto"},
+            {"hostname": "FGT", "vendor": "fortinet"},
+        ]
+        generate.enrich_inventory(firewalls)
+        self.assertFalse(firewalls[0]["panos_10_2_metrics"])
+        self.assertTrue(firewalls[1]["panos_10_2_metrics"])
+        self.assertFalse(firewalls[2]["panos_10_2_metrics"])
+        self.assertIs(firewalls[0]["pa_cluster"], False)
+        self.assertIs(firewalls[1]["pa_cluster"], False)
+        self.assertIs(firewalls[3]["pa_cluster"], True)
+        self.assertNotIn("panos_10_2_metrics", firewalls[4])
+        self.assertIs(firewalls[4]["pa_cluster"], False)
+        self.assertNotIn("pa_cluster", firewalls[5])
+        with self.assertRaisesRegex(SystemExit, "pa_cluster"):
+            generate.enrich_inventory([{"hostname": "BAD", "vendor": "paloalto", "pa_cluster": "maybe"}])
+
+    def test_saved_inventory_omits_private_bookkeeping(self):
+        firewall = {"hostname": "FW-CORE-01", "vendor": "paloalto"}
+        generate.enrich_inventory([firewall])
+        self.assertIn(generate.INFERRED_KEYS_FIELD, firewall)
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "generated.yml"
+            generate.save_inventory([firewall], destination)
+            content = destination.read_text(encoding="utf-8")
+        self.assertNotIn("_inferred_keys", content)
+        self.assertIn("chassis: false", content)
+
+    def test_snmp_conf_v2c_quotes_community(self):
+        conf = generate.build_snmp_conf({"snmp_version": 2, "community": 'a b"c\\d$e'})
+        self.assertEqual(conf, 'defVersion 2c\ndefCommunity "a b\\"c\\\\d$e"\n')
+
+    def test_snmp_conf_v3_auth_priv_and_auth_no_priv(self):
+        conf = generate.build_snmp_conf({
+            "snmp_version": 3,
+            "username": "monitor",
+            "auth_protocol": "sha256",
+            "auth_password": "auth secret",
+            "priv_protocol": "aes256",
+            "priv_password": "priv\\secret",
+        })
+        self.assertEqual(
+            conf.splitlines(),
+            [
+                "defVersion 3",
+                "defSecurityLevel authPriv",
+                'defSecurityName "monitor"',
+                "defAuthType SHA-256",
+                'defAuthPassphrase "auth secret"',
+                "defPrivType AES-256",
+                'defPrivPassphrase "priv\\\\secret"',
+            ],
+        )
+        auth_only = generate.build_snmp_conf({
+            "snmp_version": 3, "username": "u", "auth_protocol": "sha", "auth_password": "a",
+        })
+        self.assertIn("defSecurityLevel authNoPriv", auth_only)
+        self.assertNotIn("defPriv", auth_only)
+
+    def test_snmp_conf_rejects_line_breaks_and_injected_protocols(self):
+        with self.assertRaises(SystemExit) as raised:
+            generate.build_snmp_conf({"snmp_version": 2, "community": "top\ndefVersion 1"})
+        self.assertIn("community", str(raised.exception))
+        self.assertNotIn("top", str(raised.exception))
+        with self.assertRaisesRegex(SystemExit, "auth_protocol"):
+            generate.build_snmp_conf({
+                "snmp_version": 3, "username": "u", "auth_password": "a", "priv_password": "p",
+                "auth_protocol": "SHA\ndefVersion 1",
+            })
+
+    def test_snmp_discovery_keeps_secrets_off_the_command_line(self):
+        firewall = {
+            "snmp_version": 3,
+            "username": "monitor",
+            "auth_protocol": "sha256",
+            "auth_password": "AuthSecret-1",
+            "priv_protocol": "aes256",
+            "priv_password": "PrivSecret-2",
+        }
+        conf = generate.build_snmp_conf(firewall)
+        results = [
+            subprocess.CompletedProcess([], 0, stdout='"PA-440 firewall"\n', stderr=""),
+            subprocess.CompletedProcess([], 0, stdout='"vsys1"\n"vsys2"\n', stderr=""),
+        ]
+        with mock.patch.object(generate, "SNMP_IMAGE", "image-id"), mock.patch.object(
+            generate.subprocess, "run", side_effect=results
+        ) as run:
+            self.assertEqual(generate.snmp_get("192.0.2.1", ".1.3.6.1.2.1.1.1.0", conf), "PA-440 firewall")
+            self.assertEqual(generate.snmp_walk_first("192.0.2.1", ".1.3.6.1.2", conf), "vsys1")
+        self.assertEqual(run.call_count, 2)
+        for call, tool, oid in zip(run.call_args_list, ("snmpget", "snmpwalk"), (".1.3.6.1.2.1.1.1.0", ".1.3.6.1.2")):
+            argv = call.args[0]
+            joined = " ".join(argv)
+            self.assertNotIn("AuthSecret-1", joined)
+            self.assertNotIn("PrivSecret-2", joined)
+            self.assertNotIn("monitor", joined)
+            self.assertIn("AuthSecret-1", call.kwargs["input"])
+            self.assertIn("PrivSecret-2", call.kwargs["input"])
+            self.assertEqual(argv[:4], ["docker", "run", "-i", "--rm"])
+            self.assertIn("SNMPCONFPATH=/tmp/snmp", argv)
+            self.assertIn(tool, argv)
+            self.assertEqual(argv[-2:], ["192.0.2.1", oid])
+            timeout_index = argv.index("-t")
+            self.assertEqual(argv[timeout_index + 1], str(generate.SNMP_DISCOVERY_TIMEOUT))
+            self.assertEqual(argv[argv.index("-r") + 1], str(generate.SNMP_DISCOVERY_RETRIES))
+
+    def test_snmp_discovery_without_image_does_not_run_docker(self):
+        with mock.patch.object(generate, "SNMP_IMAGE", ""), mock.patch.object(generate.subprocess, "run") as run:
+            self.assertEqual(generate.snmp_get("192.0.2.1", ".1", "conf"), "")
+            self.assertEqual(generate.snmp_walk_first("192.0.2.1", ".1", "conf"), "")
+        run.assert_not_called()
+
+    def test_snmp_discovery_timeout_environment_override(self):
+        self.assertEqual(generate.SNMP_DISCOVERY_RETRIES, 1)
+        with mock.patch.dict(os.environ, {"SNMP_DISCOVERY_TIMEOUT": "5"}):
+            self.assertEqual(generate._discovery_timeout(), 5)
+        with mock.patch.dict(os.environ, {"SNMP_DISCOVERY_TIMEOUT": "invalid"}):
+            self.assertEqual(generate._discovery_timeout(), 2)
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SNMP_DISCOVERY_TIMEOUT", None)
+            self.assertEqual(generate._discovery_timeout(), 2)
+
+    def test_import_has_no_logging_side_effects(self):
+        self.assertNotIsInstance(sys.stdout, generate.Tee)
+        self.assertFalse(hasattr(generate, "LOG_FILE"))
+        self.assertFalse(hasattr(generate, "_log_handle"))
+
+    def test_configure_logging_tees_and_restores(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cwd = os.getcwd()
+            original_stdout = sys.stdout
+            try:
+                with mock.patch.object(generate, "PROJECT_DIR", root):
+                    restore = generate.configure_logging()
+                    try:
+                        self.assertIsInstance(sys.stdout, generate.Tee)
+                        print("hello-log")
+                    finally:
+                        restore()
+            finally:
+                os.chdir(cwd)
+            self.assertIs(sys.stdout, original_stdout)
+            logs = list((root / "logs").glob("generate-*.log"))
+            self.assertEqual(len(logs), 1)
+            self.assertIn("hello-log", logs[0].read_text(encoding="utf-8"))
+
+    def test_prepare_runtime_dirs_leaves_writable_dirs_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "grafana-data").mkdir()
+            (root / "logs" / "telegraf").mkdir(parents=True)
+            (root / "grafana-data").chmod(0o777)
+            (root / "logs" / "telegraf").chmod(0o777)
+            with mock.patch.object(generate, "PROJECT_DIR", root), mock.patch.object(
+                generate, "is_root", return_value=False
+            ), mock.patch("builtins.print") as printed:
+                generate.prepare_runtime_dirs()
+            warnings = [call.args[0] for call in printed.call_args_list if "WARNING" in str(call.args[0])]
+            self.assertEqual(warnings, [])
+
+    def test_prepare_runtime_dirs_warns_before_widening_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with mock.patch.object(generate, "PROJECT_DIR", root), mock.patch.object(
+                generate, "is_root", return_value=False
+            ), mock.patch("builtins.print") as printed:
+                generate.prepare_runtime_dirs()
+            grafana_mode = stat.S_IMODE((root / "grafana-data").stat().st_mode)
+            logs_mode = stat.S_IMODE((root / "logs" / "telegraf").stat().st_mode)
+        messages = " ".join(str(call.args[0]) for call in printed.call_args_list)
+        self.assertEqual(grafana_mode, 0o777)
+        self.assertEqual(logs_mode, 0o777)
+        self.assertIn("sudo chown -R 472:472", messages)
+        self.assertIn("WARNING", messages)
+
+    def test_container_can_write_detects_matching_owner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            path.chmod(0o755)
+            owner = os.stat(path).st_uid
+            self.assertTrue(generate.container_can_write(path, owner))
+            self.assertFalse(generate.container_can_write(path, owner + 12345))
+            self.assertFalse(generate.container_can_write(path, None))
+            with mock.patch("builtins.print"):
+                self.assertFalse(generate.ensure_container_writable(path, owner))
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o755)
+
     def test_snmp_arguments_cover_v2_v3_security_levels(self):
         self.assertEqual(
             generate.build_snmp_args({"snmp_version": 2, "community": "community"}),
@@ -154,7 +381,7 @@ class GeneratorCoreTests(unittest.TestCase):
         }
         with mock.patch.object(generate, "SNMP_DISCOVERY", "true"), mock.patch.object(
             generate, "ensure_snmp_image", return_value=True
-        ), mock.patch.object(generate, "snmp_get", side_effect=lambda _host, oid, _args: values[oid]), mock.patch.object(
+        ), mock.patch.object(generate, "snmp_get", side_effect=lambda _host, oid, _conf: values[oid]), mock.patch.object(
             generate, "snmp_walk_first", return_value="vsys1"
         ):
             generate.discover_paloalto_devices([firewall], {"paloalto"})
@@ -179,7 +406,7 @@ class GeneratorCoreTests(unittest.TestCase):
         }
         with mock.patch.object(generate, "SNMP_DISCOVERY", "true"), mock.patch.object(
             generate, "ensure_snmp_image", return_value=True
-        ), mock.patch.object(generate, "snmp_get", side_effect=lambda _host, oid, _args: values[oid]), mock.patch.object(
+        ), mock.patch.object(generate, "snmp_get", side_effect=lambda _host, oid, _conf: values[oid]), mock.patch.object(
             generate, "snmp_walk_first", return_value="root"
         ):
             generate.discover_fortinet_devices([firewall], {"fortinet"})
