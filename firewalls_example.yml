@@ -7,6 +7,10 @@
 # and SNMP credentials. generate.sh discovers versions, models, chassis
 # status, VSYS/VDOM availability, and optional feature flags over SNMP.
 #
+# Monitoring sources: Fortinet uses SNMP. Palo Alto can use SNMP only
+# (default), SNMP + XML API (add api_monitoring with enabled: true), or
+# the XML API only (snmp: false, no SNMP keys; see the API-only example).
+#
 # Secrets are exact ${VARIABLE} references resolved from .env (see
 # .env.example). Direct values also work but keep secrets in this file.
 # Use the firewall's own hostname (SNMP sysName) as hostname.

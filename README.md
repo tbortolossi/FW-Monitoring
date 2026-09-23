@@ -122,9 +122,66 @@ To update the project later, run `git pull` in the `FW-Monitoring` directory, re
    nano firewalls.yml
    ```
 
-   Declare each firewall with a hostname, management IP, vendor, and SNMP settings. Reference secrets as `${VARIABLE}` values defined in `.env`; see [Write `firewalls.yml` Step by Step](#write-firewallsyml-step-by-step) and the key reference in [Firewall Inventory](#firewall-inventory).
+   Declare each firewall with a hostname, management IP, vendor, and its monitoring source. Reference secrets as `${VARIABLE}` values defined in `.env`; see [Write `firewalls.yml` Step by Step](#write-firewallsyml-step-by-step) and the key reference in [Firewall Inventory](#firewall-inventory).
 
-3. Configure SNMP on the firewalls ([Palo Alto](#palo-alto-snmp-setup), [Fortinet](#fortinet-snmp-setup)). For Palo Alto API monitoring, also follow [Palo Alto XML API Setup](#palo-alto-xml-api-setup): after the first `./generate.sh`, `paloalto_api_key.py` generates the key and writes it to `.env` (or to `firewalls.yml` with `--storage yaml`).
+3. Configure the firewalls for the monitoring source you chose. Fortinet uses SNMP. A Palo Alto firewall can use SNMP, the XML API, or both:
+
+   | Palo Alto mode | `firewalls.yml` | Firewall setup | Dashboards |
+   | --- | --- | --- | --- |
+   | SNMP only (default) | SNMP keys, no `api_monitoring` block | [Palo Alto SNMP Setup](#palo-alto-snmp-setup) | SNMP dashboards |
+   | SNMP + API | SNMP keys and `api_monitoring.enabled: true` | SNMP setup and [Palo Alto XML API Setup](#palo-alto-xml-api-setup) | SNMP and API dashboards |
+   | API only | `snmp: false`, no SNMP keys, `api_monitoring.enabled: true` | [Palo Alto XML API Setup](#palo-alto-xml-api-setup) only | API dashboards only, see [API-Only Firewalls](#api-only-firewalls) |
+
+   Minimal `firewalls.yml` entries for each mode (SNMPv3 shown; SNMPv2c uses `snmp_version: 2` and `community` instead of the v3 keys):
+
+   ```yaml
+   # SNMP only
+   - hostname: PA-SNMP
+     host: 192.0.2.101
+     vendor: paloalto
+     snmp_version: 3
+     username: snmpv3_user
+     auth_protocol: sha256
+     auth_password: ${PA_SNMP_SNMP_AUTH}
+     priv_protocol: aes256
+     priv_password: ${PA_SNMP_SNMP_PRIV}
+
+   # SNMP + API
+   - hostname: PA-BOTH
+     host: 192.0.2.102
+     vendor: paloalto
+     snmp_version: 3
+     username: snmpv3_user
+     auth_protocol: sha256
+     auth_password: ${PA_BOTH_SNMP_AUTH}
+     priv_protocol: aes256
+     priv_password: ${PA_BOTH_SNMP_PRIV}
+     api_monitoring:
+       enabled: true
+       api_key: ${PALOALTO_API_KEY_PA_BOTH}
+
+   # API only
+   - hostname: PA-API
+     host: 192.0.2.103
+     vendor: paloalto
+     snmp: false
+     api_monitoring:
+       enabled: true
+       api_key: ${PALOALTO_API_KEY_PA_API}
+
+   # Fortinet (SNMP only)
+   - hostname: FGT-80F
+     host: 192.0.2.104
+     vendor: fortinet
+     snmp_version: 3
+     username: snmpv3_user
+     auth_protocol: sha256
+     auth_password: ${FGT_80F_SNMP_AUTH}
+     priv_protocol: aes256
+     priv_password: ${FGT_80F_SNMP_PRIV}
+   ```
+
+   For Fortinet, follow [Fortinet SNMP Setup](#fortinet-snmp-setup). For any API mode, run `paloalto_api_key.py` after the first `./generate.sh`: it generates the key and writes it to `.env` (or to `firewalls.yml` with `--storage yaml`).
 
 4. Generate the configuration and start the stack:
 
