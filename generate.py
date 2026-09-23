@@ -588,7 +588,23 @@ def ensure_snmp_image():
     global SNMP_IMAGE
     if SNMP_IMAGE:
         return True
-    run(["docker", "compose", "build", "telegraf"], stdout=subprocess.DEVNULL)
+    # No stream may be a terminal here: when only stdout was redirected, some
+    # Compose/buildx versions still picked the TTY progress UI from stderr and
+    # failed with "failed to get console: provided file is not a console".
+    print("Building the Telegraf image for SNMP discovery (the first build can take a few minutes)...")
+    try:
+        run(
+            ["docker", "compose", "build", "telegraf"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env={**os.environ, "BUILDKIT_PROGRESS": "plain"},
+        )
+    except subprocess.CalledProcessError as exc:
+        if exc.output:
+            sys.stderr.write(exc.output)
+        raise
     images = capture(["docker", "compose", "images", "-q", "telegraf"]).splitlines()
     SNMP_IMAGE = images[0].strip() if images else ""
     if not SNMP_IMAGE:
