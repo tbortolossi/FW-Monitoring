@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- API-only Palo Alto firewalls: `snmp: false` on an entry with `api_monitoring` enabled skips SNMP credentials, discovery and polling for that firewall, so a device reachable only over HTTPS is monitored by the XML API collector alone. It is rejected on Fortinet entries and without an enabled API block.
+
 ## 1.3.0 - 2026-09-23
 
 ### Added
