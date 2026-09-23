@@ -530,6 +530,7 @@ class MainOrchestrationTests(TempProjectMixin, unittest.TestCase):
         "prepare_paloalto_mibs",
         "render_paloalto_api_inventory",
         "render_paloalto_api_environment",
+        "check_paloalto_api_access",
         "render_telegraf",
         "start_stack",
     )
@@ -557,6 +558,7 @@ class MainOrchestrationTests(TempProjectMixin, unittest.TestCase):
         parent.discover_paloalto_devices.assert_called_once_with(firewalls, vendors)
         parent.save_inventory.assert_called_once_with(firewalls, generate.ENRICHED_FIREWALLS)
         parent.render_paloalto_api_environment.assert_called_once_with(firewalls)
+        parent.check_paloalto_api_access.assert_called_once_with(firewalls)
         parent.render_telegraf.assert_called_once_with(rendered, vendors)
 
     def test_main_stops_before_any_write_when_docker_is_missing(self):

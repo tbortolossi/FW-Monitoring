@@ -2,9 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- `README.md` has an "Install on Ubuntu" section (packages, `git clone`, Docker, `docker` group) and an installation troubleshooting table.
+- `generate.py` checks Palo Alto XML API access for every firewall with `api_monitoring` enabled: one read-only `show system info` per firewall, run in parallel, printing `API OK` with model and PAN-OS version, or why it failed (key rejected, untrusted TLS certificate, unreachable, missing key). The check never stops generation or prints the key; `API_CHECK=false` skips it and `API_CHECK_TIMEOUT` (default 5 s) bounds it.
+
 ### Fixed
 
 - `generate.py` now restarts Telegraf after `docker compose up -d`. `telegraf.conf` and `paloalto-api.json` are bind mounts, so Compose did not recreate the container when only their content changed and a rerun of `./generate.sh` (new firewall, `verify_tls: false`, changed credentials) was silently ignored until a manual `docker compose restart telegraf`.
+- `generate.py` checks that the Docker daemon is reachable before doing any work and explains how to fix a `docker.sock` permission error (add the user to the `docker` group) or a stopped daemon, instead of failing later with a traceback during the discovery image build.
+- `sudo ./generate.sh` adds the user who ran it to the `docker` group when it installs Docker, so later runs work without `sudo`.
+- `generate.sh` is now stored as executable in Git, so `./generate.sh` works right after `git clone` without `chmod +x`.
 
 ## 1.3.0 - 2026-09-23
 
