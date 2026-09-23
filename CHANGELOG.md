@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1 - 2026-09-23
+
+### Fixed
+
+- Palo Alto API dashboards showed **MP RAM: No data** on large management planes such as the PA-5580. `top` reports a value wider than its column as `1031206.+total`; the collector now accepts it when only the decimal was dropped, and still ignores a line whose integer digits may be missing rather than writing a wrong value. Rebuild the Telegraf image (`./generate.sh`) to apply.
+
 ## 1.4.0 - 2026-09-23
 
 ### Added
