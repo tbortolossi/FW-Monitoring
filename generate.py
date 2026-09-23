@@ -8,11 +8,15 @@ import os
 import re
 import shutil
 import stat
+import ssl
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 try:
@@ -89,6 +93,19 @@ def _discovery_timeout():
 
 SNMP_DISCOVERY_TIMEOUT = _discovery_timeout()
 SNMP_DISCOVERY_RETRIES = 1
+API_CHECK = os.environ.get("API_CHECK", "true").lower()
+
+
+def _api_check_timeout():
+    # API_CHECK_TIMEOUT (seconds, integer >= 1) bounds the one-shot API check;
+    # the firewall's own api_monitoring.timeout is used when it is shorter.
+    try:
+        return max(1, int(os.environ.get("API_CHECK_TIMEOUT", "5")))
+    except ValueError:
+        return 5
+
+
+API_CHECK_TIMEOUT = _api_check_timeout()
 
 
 def run(cmd, **kwargs):
@@ -134,6 +151,29 @@ def check_docker():
         capture(["docker", "compose", "version"])
     except subprocess.CalledProcessError as exc:
         raise SystemExit("ERROR: Docker Compose v2 is not installed. Install Docker Compose v2 or docker-compose-plugin.") from exc
+
+    # `docker compose version` works without the daemon; `docker info` needs it.
+    result = subprocess.run(
+        ["docker", "info"],
+        text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode == 0:
+        return
+    if "permission denied" in result.stderr.lower():
+        raise SystemExit(
+            "ERROR: this user cannot access the Docker daemon (permission denied on /var/run/docker.sock).\n"
+            "Add the user to the docker group, then log out and back in:\n"
+            "  sudo usermod -aG docker $USER\n"
+            "Check with `docker ps`, then rerun ./generate.sh (do not run it with sudo)."
+        )
+    raise SystemExit(
+        "ERROR: the Docker daemon is not reachable:\n"
+        f"  {result.stderr.strip()}\n"
+        "Start it and rerun this script:\n"
+        "  sudo systemctl enable --now docker"
+    )
 
 
 def check_env_file():
@@ -1054,11 +1094,86 @@ def render_paloalto_api_environment(firewalls, source=None):
     return rendered_firewalls
 
 
+def check_paloalto_api(config, api_key):
+    """Run one read-only ``show system info``; return a one-line status, never the key."""
+    request = urllib.request.Request(
+        f"https://{config['host']}:{config['port']}/api/",
+        data=urllib.parse.urlencode({"type": "op", "cmd": "<show><system><info></info></system></show>"}).encode(),
+        headers={"X-PAN-KEY": api_key, "Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    if config.get("verify_tls", True):
+        context = ssl.create_default_context()
+    else:
+        context = ssl._create_unverified_context()  # noqa: SLF001 - explicit operator choice
+    timeout = min(API_CHECK_TIMEOUT, int(config.get("timeout", API_CHECK_TIMEOUT)))
+    try:
+        with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+            payload = response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            return f"API key rejected (HTTP {exc.code}); regenerate it with paloalto_api_key.py"
+        return f"API error (HTTP {exc.code})"
+    except urllib.error.URLError as exc:
+        reason = exc.reason
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            return "TLS certificate not trusted; install a trusted certificate or set api_monitoring.verify_tls: false"
+        return f"API unreachable ({reason})"
+    except OSError as exc:
+        return f"API unreachable ({exc})"
+    try:
+        root = ET.fromstring(payload)
+    except ET.ParseError:
+        return "API returned invalid XML"
+    if root.attrib.get("status") != "success":
+        message = " ".join(text.strip() for text in root.itertext() if text.strip())
+        return f"API request refused ({message or 'no detail'})"
+    model = (root.findtext(".//system/model") or "").strip()
+    version = (root.findtext(".//system/sw-version") or "").strip()
+    return f"API OK{', model ' + model if model else ''}{', PAN-OS ' + version if version else ''}"
+
+
+def check_paloalto_api_access(firewalls, source=None):
+    """Best-effort reachability and key check for every enabled API firewall."""
+    targets = [
+        firewall for firewall in firewalls
+        if firewall.get("vendor") == "paloalto" and firewall.get("api_monitoring", {}).get("enabled")
+    ]
+    if not targets:
+        return
+    if API_CHECK != "true":
+        print(f"Palo Alto API check disabled (API_CHECK={API_CHECK})")
+        return
+    source_path = Path(source or PROJECT_DIR / ".env")
+    source_values = load_dotenv(source_path) if source_path.exists() else {}
+
+    def probe(firewall):
+        config = firewall["api_monitoring"]
+        api_key = config.get("api_key") or source_values.get(config.get("api_key_env", ""))
+        if not api_key:
+            return "API key not found, skipping"
+        try:
+            return check_paloalto_api(config, api_key)
+        except Exception as exc:  # best effort: never stop generation
+            return f"API check failed ({type(exc).__name__})"
+
+    print("Checking Palo Alto XML API access...")
+    with ThreadPoolExecutor(max_workers=min(8, len(targets))) as executor:
+        for firewall, status in zip(targets, executor.map(probe, targets)):
+            print(f"    {firewall['hostname']}: {status}")
+
+
 def start_stack():
     print("Building Telegraf image...")
     run(["docker", "compose", "build", "telegraf"])
     print("Starting or refreshing the Docker stack...")
     run(["docker", "compose", "up", "-d"])
+    # telegraf.conf and paloalto-api.json are bind mounts: Compose does not
+    # recreate the container when only their content changes, and Telegraf
+    # and the API collector read them once at startup. Restart Telegraf so a
+    # refreshed inventory always takes effect.
+    print("Restarting Telegraf to load the generated configuration...")
+    run(["docker", "compose", "restart", "telegraf"])
     run(["docker", "compose", "ps"])
     print("Stack is operational.")
 
@@ -1082,6 +1197,7 @@ def main():
     prepare_paloalto_mibs(firewalls, vendors)
     render_paloalto_api_inventory(firewalls)
     rendered_firewalls = render_paloalto_api_environment(firewalls)
+    check_paloalto_api_access(firewalls)
     render_telegraf(rendered_firewalls, vendors)
     start_stack()
 

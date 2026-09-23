@@ -490,6 +490,7 @@ class GeneratorCoreTests(unittest.TestCase):
             [
                 ["docker", "compose", "build", "telegraf"],
                 ["docker", "compose", "up", "-d"],
+                ["docker", "compose", "restart", "telegraf"],
                 ["docker", "compose", "ps"],
             ],
         )
@@ -508,6 +509,7 @@ class GeneratorCoreTests(unittest.TestCase):
             "save_inventory",
             "prepare_paloalto_mibs",
             "render_paloalto_api_inventory",
+            "check_paloalto_api_access",
             "render_telegraf",
             "start_stack",
         )
@@ -525,6 +527,28 @@ class GeneratorCoreTests(unittest.TestCase):
         with mock.patch.object(generate, "command_exists", return_value=False):
             with self.assertRaisesRegex(SystemExit, "Docker is required"):
                 generate.check_docker()
+
+    def _check_docker_with_info(self, returncode, stderr=""):
+        info = subprocess.CompletedProcess(["docker", "info"], returncode, None, stderr)
+        with mock.patch.object(generate, "command_exists", return_value=True), mock.patch.object(
+            generate, "capture", return_value="Docker Compose version v2.29.0"
+        ), mock.patch.object(generate.subprocess, "run", return_value=info) as run:
+            generate.check_docker()
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0], ["docker", "info"])
+
+    def test_check_docker_accepts_reachable_daemon(self):
+        self._check_docker_with_info(0)
+
+    def test_check_docker_reports_socket_permission_denied(self):
+        stderr = "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock\n"
+        with self.assertRaisesRegex(SystemExit, r"usermod -aG docker \$USER"):
+            self._check_docker_with_info(1, stderr)
+
+    def test_check_docker_reports_stopped_daemon(self):
+        stderr = "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"
+        with self.assertRaisesRegex(SystemExit, "(?s)Cannot connect to the Docker daemon.*systemctl enable --now docker"):
+            self._check_docker_with_info(1, stderr)
 
     def test_capture_propagates_command_failure(self):
         with self.assertRaises(subprocess.CalledProcessError):
