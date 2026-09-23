@@ -1133,6 +1133,12 @@ def start_stack():
     run(["docker", "compose", "build", "telegraf"])
     print("Starting or refreshing the Docker stack...")
     run(["docker", "compose", "up", "-d"])
+    # telegraf.conf and paloalto-api.json are bind mounts: Compose does not
+    # recreate the container when only their content changes, and Telegraf
+    # and the API collector read them once at startup. Restart Telegraf so a
+    # refreshed inventory always takes effect.
+    print("Restarting Telegraf to load the generated configuration...")
+    run(["docker", "compose", "restart", "telegraf"])
     run(["docker", "compose", "ps"])
     print("Stack is operational.")
 

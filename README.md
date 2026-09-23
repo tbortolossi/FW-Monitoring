@@ -202,7 +202,7 @@ On each run, the generator:
 8. writes `telegraf/paloalto-api.env` (mode `0600`) with only the SNMP secrets and API keys Telegraf needs. Each value is double-quoted, and each backslash, double quote, and dollar sign is prefixed with a backslash, so any value round-trips unchanged through Docker Compose. Values containing a line break or NUL byte are rejected; the error names the variable, never the value;
 9. for each Palo Alto firewall with API monitoring enabled, runs one read-only `show system info` over HTTPS from the Docker host and prints `API OK` with the model and PAN-OS version, or the reason it failed (key rejected, untrusted TLS certificate, unreachable). The check is informational and never stops generation; the key is sent only in the `X-PAN-KEY` header and never printed;
 10. renders `telegraf/telegraf.conf`, which references those secrets as `$FIREWALL_SNMP_...` / `PALOALTO_API_KEY_...` variables instead of containing them;
-11. rebuilds the Telegraf image and runs `docker compose up -d`;
+11. rebuilds the Telegraf image, runs `docker compose up -d`, then restarts Telegraf so the regenerated configuration is loaded;
 12. mirrors its output to a timestamped log under `logs/`.
 
 Environment overrides for a single run:
