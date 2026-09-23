@@ -8,11 +8,15 @@ import os
 import re
 import shutil
 import stat
+import ssl
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 try:
@@ -89,6 +93,19 @@ def _discovery_timeout():
 
 SNMP_DISCOVERY_TIMEOUT = _discovery_timeout()
 SNMP_DISCOVERY_RETRIES = 1
+API_CHECK = os.environ.get("API_CHECK", "true").lower()
+
+
+def _api_check_timeout():
+    # API_CHECK_TIMEOUT (seconds, integer >= 1) bounds the one-shot API check;
+    # the firewall's own api_monitoring.timeout is used when it is shorter.
+    try:
+        return max(1, int(os.environ.get("API_CHECK_TIMEOUT", "5")))
+    except ValueError:
+        return 5
+
+
+API_CHECK_TIMEOUT = _api_check_timeout()
 
 
 def run(cmd, **kwargs):
@@ -1019,6 +1036,75 @@ def render_paloalto_api_environment(firewalls, source=None):
     return rendered_firewalls
 
 
+def check_paloalto_api(config, api_key):
+    """Run one read-only ``show system info``; return a one-line status, never the key."""
+    request = urllib.request.Request(
+        f"https://{config['host']}:{config['port']}/api/",
+        data=urllib.parse.urlencode({"type": "op", "cmd": "<show><system><info></info></system></show>"}).encode(),
+        headers={"X-PAN-KEY": api_key, "Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    if config.get("verify_tls", True):
+        context = ssl.create_default_context()
+    else:
+        context = ssl._create_unverified_context()  # noqa: SLF001 - explicit operator choice
+    timeout = min(API_CHECK_TIMEOUT, int(config.get("timeout", API_CHECK_TIMEOUT)))
+    try:
+        with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+            payload = response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            return f"API key rejected (HTTP {exc.code}); regenerate it with paloalto_api_key.py"
+        return f"API error (HTTP {exc.code})"
+    except urllib.error.URLError as exc:
+        reason = exc.reason
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            return "TLS certificate not trusted; install a trusted certificate or set api_monitoring.verify_tls: false"
+        return f"API unreachable ({reason})"
+    except OSError as exc:
+        return f"API unreachable ({exc})"
+    try:
+        root = ET.fromstring(payload)
+    except ET.ParseError:
+        return "API returned invalid XML"
+    if root.attrib.get("status") != "success":
+        message = " ".join(text.strip() for text in root.itertext() if text.strip())
+        return f"API request refused ({message or 'no detail'})"
+    model = (root.findtext(".//system/model") or "").strip()
+    version = (root.findtext(".//system/sw-version") or "").strip()
+    return f"API OK{', model ' + model if model else ''}{', PAN-OS ' + version if version else ''}"
+
+
+def check_paloalto_api_access(firewalls, source=None):
+    """Best-effort reachability and key check for every enabled API firewall."""
+    targets = [
+        firewall for firewall in firewalls
+        if firewall.get("vendor") == "paloalto" and firewall.get("api_monitoring", {}).get("enabled")
+    ]
+    if not targets:
+        return
+    if API_CHECK != "true":
+        print(f"Palo Alto API check disabled (API_CHECK={API_CHECK})")
+        return
+    source_path = Path(source or PROJECT_DIR / ".env")
+    source_values = load_dotenv(source_path) if source_path.exists() else {}
+
+    def probe(firewall):
+        config = firewall["api_monitoring"]
+        api_key = config.get("api_key") or source_values.get(config.get("api_key_env", ""))
+        if not api_key:
+            return "API key not found, skipping"
+        try:
+            return check_paloalto_api(config, api_key)
+        except Exception as exc:  # best effort: never stop generation
+            return f"API check failed ({type(exc).__name__})"
+
+    print("Checking Palo Alto XML API access...")
+    with ThreadPoolExecutor(max_workers=min(8, len(targets))) as executor:
+        for firewall, status in zip(targets, executor.map(probe, targets)):
+            print(f"    {firewall['hostname']}: {status}")
+
+
 def start_stack():
     print("Building Telegraf image...")
     run(["docker", "compose", "build", "telegraf"])
@@ -1047,6 +1133,7 @@ def main():
     prepare_paloalto_mibs(firewalls, vendors)
     render_paloalto_api_inventory(firewalls)
     rendered_firewalls = render_paloalto_api_environment(firewalls)
+    check_paloalto_api_access(firewalls)
     render_telegraf(rendered_firewalls, vendors)
     start_stack()
 

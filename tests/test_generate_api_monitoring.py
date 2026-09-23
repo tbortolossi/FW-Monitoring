@@ -243,5 +243,137 @@ class GeneratorApiValidationTests(unittest.TestCase):
                 self.assertEqual(compose_decode(generate.compose_environment_value(value)), value)
 
 
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return self.payload
+
+
+def api_config(**overrides):
+    config = {"host": "192.0.2.10", "port": 443, "verify_tls": True, "timeout": 15}
+    config.update(overrides)
+    return config
+
+
+class GeneratorApiAccessCheckTests(unittest.TestCase):
+    def check(self, side_effect, **overrides):
+        with mock.patch.object(generate.urllib.request, "urlopen", side_effect=side_effect) as urlopen:
+            status = generate.check_paloalto_api(api_config(**overrides), "api-secret")
+        return status, urlopen
+
+    def test_success_reports_model_and_version(self):
+        payload = (
+            b"<response status='success'><result><system>"
+            b"<model>PA-5540</model><sw-version>12.1.4-h3</sw-version>"
+            b"</system></result></response>"
+        )
+        status, urlopen = self.check([FakeResponse(payload)])
+        self.assertEqual(status, "API OK, model PA-5540, PAN-OS 12.1.4-h3")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://192.0.2.10:443/api/")
+        self.assertEqual(request.get_header("X-pan-key"), "api-secret")
+        self.assertNotIn(b"api-secret", request.data)
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], generate.API_CHECK_TIMEOUT)
+
+    def test_shorter_firewall_timeout_wins(self):
+        _, urlopen = self.check([FakeResponse(b"<response status='success'/>")], timeout=1)
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 1)
+
+    def test_rejected_key(self):
+        error = generate.urllib.error.HTTPError("https://x/api/", 403, "Forbidden", {}, None)
+        status, _ = self.check(error)
+        self.assertIn("API key rejected (HTTP 403)", status)
+
+    def test_other_http_error(self):
+        error = generate.urllib.error.HTTPError("https://x/api/", 500, "Server Error", {}, None)
+        self.assertEqual(self.check(error)[0], "API error (HTTP 500)")
+
+    def test_untrusted_certificate_suggests_verify_tls(self):
+        error = generate.urllib.error.URLError(generate.ssl.SSLCertVerificationError("self-signed"))
+        self.assertIn("verify_tls: false", self.check(error)[0])
+
+    def test_unverified_context_when_tls_verification_disabled(self):
+        _, urlopen = self.check([FakeResponse(b"<response status='success'/>")], verify_tls=False)
+        self.assertEqual(urlopen.call_args.kwargs["context"].verify_mode, generate.ssl.CERT_NONE)
+
+    def test_unreachable(self):
+        self.assertIn("API unreachable", self.check(generate.urllib.error.URLError("timed out"))[0])
+        self.assertIn("API unreachable", self.check(TimeoutError("timed out"))[0])
+
+    def test_invalid_xml(self):
+        self.assertEqual(self.check([FakeResponse(b"<html>")])[0], "API returned invalid XML")
+
+    def test_refused_request_shows_pan_os_message(self):
+        payload = b"<response status='error'><msg><line>Invalid credentials.</line></msg></response>"
+        self.assertEqual(self.check([FakeResponse(payload)])[0], "API request refused (Invalid credentials.)")
+
+    def run_access_check(self, firewalls, env_text="PA_KEY=from-env\n", check_result="API OK"):
+        with tempfile.TemporaryDirectory() as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text(env_text, encoding="utf-8")
+            with mock.patch.object(generate, "check_paloalto_api", return_value=check_result) as check, \
+                    mock.patch("builtins.print") as printed:
+                generate.check_paloalto_api_access(firewalls, env_path)
+        output = "\n".join(str(call.args[0]) for call in printed.call_args_list)
+        return check, output
+
+    def test_access_check_resolves_keys_and_skips_disabled_firewalls(self):
+        firewalls = inventory({"enabled": True, "api_key_env": "PA_KEY"})
+        generate.validate_inventory(firewalls)
+        disabled = inventory({"enabled": False})
+        disabled[0]["hostname"] = "PA-OFF"
+        generate.validate_inventory(disabled)
+        check, output = self.run_access_check(firewalls + disabled)
+        check.assert_called_once()
+        self.assertEqual(check.call_args.args[1], "from-env")
+        self.assertIn("PA-440: API OK", output)
+        self.assertNotIn("PA-OFF", output)
+        self.assertNotIn("from-env", output)
+
+    def test_access_check_reports_missing_key(self):
+        firewalls = inventory({"enabled": True, "api_key_env": "PA_KEY"})
+        generate.validate_inventory(firewalls)
+        check, output = self.run_access_check(firewalls, env_text="")
+        check.assert_not_called()
+        self.assertIn("PA-440: API key not found", output)
+
+    def test_access_check_never_raises(self):
+        firewalls = inventory({"enabled": True, "api_key": "api-secret"})
+        generate.validate_inventory(firewalls)
+        with mock.patch.object(generate, "check_paloalto_api", side_effect=ValueError("boom")), \
+                mock.patch("builtins.print") as printed:
+            generate.check_paloalto_api_access(firewalls, Path("/nonexistent/.env"))
+        self.assertIn("API check failed (ValueError)", str(printed.call_args_list[-1]))
+
+    def test_access_check_can_be_disabled(self):
+        firewalls = inventory({"enabled": True, "api_key": "api-secret"})
+        generate.validate_inventory(firewalls)
+        with mock.patch.object(generate, "API_CHECK", "false"):
+            check, output = self.run_access_check(firewalls)
+        check.assert_not_called()
+        self.assertIn("API check disabled", output)
+
+    def test_access_check_is_silent_without_api_firewalls(self):
+        firewalls = inventory(None)
+        generate.validate_inventory(firewalls)
+        check, output = self.run_access_check(firewalls)
+        check.assert_not_called()
+        self.assertEqual(output, "")
+
+    def test_api_check_timeout_parsing(self):
+        with mock.patch.dict(generate.os.environ, {"API_CHECK_TIMEOUT": "9"}):
+            self.assertEqual(generate._api_check_timeout(), 9)
+        with mock.patch.dict(generate.os.environ, {"API_CHECK_TIMEOUT": "x"}):
+            self.assertEqual(generate._api_check_timeout(), 5)
+
+
 if __name__ == "__main__":
     unittest.main()

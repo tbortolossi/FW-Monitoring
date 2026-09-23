@@ -508,6 +508,7 @@ class GeneratorCoreTests(unittest.TestCase):
             "save_inventory",
             "prepare_paloalto_mibs",
             "render_paloalto_api_inventory",
+            "check_paloalto_api_access",
             "render_telegraf",
             "start_stack",
         )
