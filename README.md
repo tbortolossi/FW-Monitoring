@@ -35,6 +35,7 @@ The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB 
 - [Upgrade from v1.0.2 (SNMP-only, May 2026)](#upgrade-from-v102-snmp-only-may-2026)
 - [Upgrade from v1.1.0](#upgrade-from-v110)
 - [Upgrade from v1.2.0](#upgrade-from-v120)
+- [Upgrade from v1.3.0](#upgrade-from-v130)
 - [Upgrade any other installation](#upgrade-an-existing-installation)
 
 ## Requirements
@@ -979,6 +980,23 @@ docker compose ps
 ```
 
 The new `paloalto_api_vsys` fields and panels fill in after the first API polls; existing data is unaffected.
+
+## Upgrade from v1.3.0
+
+For installations made from the `v1.3.0` tag (Sep 2026). Existing inventories and secrets keep working unchanged:
+
+```bash
+git pull --ff-only
+./generate.sh
+docker compose ps
+```
+
+What changes on the next run:
+
+- `generate.sh` stops early with an explicit fix when the current user cannot reach the Docker daemon (`docker` group missing, service stopped).
+- For every firewall with `api_monitoring` enabled, it prints `API OK` or why the XML API cannot be reached (rejected key, untrusted TLS certificate, unreachable). This check never stops generation; set `API_CHECK=false` to skip it.
+- It restarts Telegraf at the end, so inventory changes take effect immediately. On v1.3.0 a rerun could leave Telegraf on the previous configuration until `docker compose restart telegraf`.
+- A Palo Alto firewall can now be declared API-only with `snmp: false` (see [API-Only Firewalls](#api-only-firewalls)). This is optional.
 
 ## Upgrade an Existing Installation
 
