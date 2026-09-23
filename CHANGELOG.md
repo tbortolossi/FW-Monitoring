@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `README.md` has an "Install on Ubuntu" section (packages, `git clone`, Docker, `docker` group) and an installation troubleshooting table.
+
+### Fixed
+
+- `generate.py` checks that the Docker daemon is reachable before doing any work and explains how to fix a `docker.sock` permission error (add the user to the `docker` group) or a stopped daemon, instead of failing later with a traceback during the discovery image build.
+- `sudo ./generate.sh` adds the user who ran it to the `docker` group when it installs Docker, so later runs work without `sudo`.
+- `generate.sh` is now stored as executable in Git, so `./generate.sh` works right after `git clone` without `chmod +x`.
+
 ## 1.3.0 - 2026-09-23
 
 ### Added
