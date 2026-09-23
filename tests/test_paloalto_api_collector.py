@@ -94,6 +94,29 @@ class CollectorParsingTests(unittest.TestCase):
         self.assertEqual(metrics["swap_used_pct"], 25.0)
         self.assertEqual(metrics["tasks_zombie"], 1)
 
+    def test_management_memory_with_truncated_decimals(self):
+        # PAN-OS 12.1.7 on a PA-5580: top drops the decimal of a too-wide value and marks it with "+".
+        result = ET.fromstring(
+            "<result>MiB Mem : 1031206.+total, 170483.8 free, 603620.1 used, 311240.7 buff/cache\n"
+            "MiB Swap:   2047.9 total,   2047.9 free,      0.0 used. 427586.6 avail Mem</result>"
+        )
+        metrics = parse_management_resources(result)
+        self.assertEqual(metrics["memory_total_bytes"], 1031206.0 * 1024**2)
+        self.assertEqual(metrics["memory_free_bytes"], 170483.8 * 1024**2)
+        self.assertAlmostEqual(metrics["memory_used_pct"], 603620.1 / 1031206.0 * 100.0)
+        self.assertEqual(metrics["swap_total_bytes"], 2047.9 * 1024**2)
+        self.assertEqual(metrics["swap_used_pct"], 0.0)
+
+    def test_management_memory_with_truncated_integer_is_ignored(self):
+        result = ET.fromstring(
+            "<result>KiB Mem : 13184950+total, 10234567+free, 2345678 used, 1234567 buff/cache\n"
+            "KiB Swap:  8388604 total,  8388604 free,        0 used.</result>"
+        )
+        metrics = parse_management_resources(result)
+        self.assertNotIn("memory_used_pct", metrics)
+        self.assertNotIn("memory_total_bytes", metrics)
+        self.assertEqual(metrics["swap_total_bytes"], 8388604.0 * 1024)
+
     def test_management_processes_are_aggregated_by_name(self):
         result = ET.fromstring(
             "<result>PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND\n"
