@@ -8,6 +8,7 @@ directories and mocks Docker, subprocess and network access.
 import io
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -266,7 +267,22 @@ class VendorAndImageTests(TempProjectMixin, unittest.TestCase):
             self.assertTrue(generate.ensure_snmp_image())
         run.assert_called_once()
         self.assertEqual(run.call_args.args[0], ["docker", "compose", "build", "telegraf"])
+        # No terminal handed to the build, or Compose may try a TTY progress UI.
+        kwargs = run.call_args.kwargs
+        self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
+        self.assertIs(kwargs["stdout"], subprocess.PIPE)
+        self.assertIs(kwargs["stderr"], subprocess.STDOUT)
+        self.assertEqual(kwargs["env"]["BUILDKIT_PROGRESS"], "plain")
         capture.assert_called_once_with(["docker", "compose", "images", "-q", "telegraf"])
+
+    def test_ensure_snmp_image_shows_build_output_on_failure(self):
+        error = subprocess.CalledProcessError(1, ["docker"], output="failed to get console\n")
+        with mock.patch.object(generate, "SNMP_IMAGE", ""), mock.patch.object(
+            generate, "run", side_effect=error
+        ), mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            with self.assertRaises(subprocess.CalledProcessError):
+                generate.ensure_snmp_image()
+        self.assertIn("failed to get console", stderr.getvalue())
 
     def test_ensure_snmp_image_falls_back_to_image_inspect(self):
         with mock.patch.object(generate, "SNMP_IMAGE", ""), mock.patch.object(generate, "run"), mock.patch.object(
