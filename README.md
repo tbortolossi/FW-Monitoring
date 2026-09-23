@@ -146,9 +146,10 @@ On each run, the generator:
 6. downloads the matching Palo Alto MIB archives when needed;
 7. writes the API runtime inventory `telegraf/paloalto-api.json` (no keys);
 8. writes `telegraf/paloalto-api.env` (mode `0600`) with only the SNMP secrets and API keys Telegraf needs. Each value is double-quoted, and each backslash, double quote, and dollar sign is prefixed with a backslash, so any value round-trips unchanged through Docker Compose. Values containing a line break or NUL byte are rejected; the error names the variable, never the value;
-9. renders `telegraf/telegraf.conf`, which references those secrets as `$FIREWALL_SNMP_...` / `PALOALTO_API_KEY_...` variables instead of containing them;
-10. rebuilds the Telegraf image and runs `docker compose up -d`;
-11. mirrors its output to a timestamped log under `logs/`.
+9. for each Palo Alto firewall with API monitoring enabled, runs one read-only `show system info` over HTTPS from the Docker host and prints `API OK` with the model and PAN-OS version, or the reason it failed (key rejected, untrusted TLS certificate, unreachable). The check is informational and never stops generation; the key is sent only in the `X-PAN-KEY` header and never printed;
+10. renders `telegraf/telegraf.conf`, which references those secrets as `$FIREWALL_SNMP_...` / `PALOALTO_API_KEY_...` variables instead of containing them;
+11. rebuilds the Telegraf image and runs `docker compose up -d`;
+12. mirrors its output to a timestamped log under `logs/`.
 
 Environment overrides for a single run:
 
@@ -156,6 +157,8 @@ Environment overrides for a single run:
 | --- | --- | --- |
 | `SNMP_DISCOVERY` | `true` | Set to `false` to skip SNMP discovery and use only declared values. |
 | `SNMP_DISCOVERY_TIMEOUT` | `2` | Discovery timeout per SNMP request, in seconds (one retry). Raise it for slow or distant firewalls. |
+| `API_CHECK` | `true` | Set to `false` to skip the Palo Alto XML API access check. |
+| `API_CHECK_TIMEOUT` | `5` | Timeout of the API access check, in seconds; a shorter `api_monitoring.timeout` wins. |
 | `PALO_MIB_VERSION` | `11-2` | Palo Alto MIB archive used when no PAN-OS version is known. |
 
 ```bash
