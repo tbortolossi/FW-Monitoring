@@ -152,6 +152,29 @@ def check_docker():
     except subprocess.CalledProcessError as exc:
         raise SystemExit("ERROR: Docker Compose v2 is not installed. Install Docker Compose v2 or docker-compose-plugin.") from exc
 
+    # `docker compose version` works without the daemon; `docker info` needs it.
+    result = subprocess.run(
+        ["docker", "info"],
+        text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode == 0:
+        return
+    if "permission denied" in result.stderr.lower():
+        raise SystemExit(
+            "ERROR: this user cannot access the Docker daemon (permission denied on /var/run/docker.sock).\n"
+            "Add the user to the docker group, then log out and back in:\n"
+            "  sudo usermod -aG docker $USER\n"
+            "Check with `docker ps`, then rerun ./generate.sh (do not run it with sudo)."
+        )
+    raise SystemExit(
+        "ERROR: the Docker daemon is not reachable:\n"
+        f"  {result.stderr.strip()}\n"
+        "Start it and rerun this script:\n"
+        "  sudo systemctl enable --now docker"
+    )
+
 
 def check_env_file():
     env_path = PROJECT_DIR / ".env"

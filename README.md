@@ -25,6 +25,7 @@ The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB 
 
 ## Common Tasks
 
+- [Install on a fresh Ubuntu host](#install-on-ubuntu)
 - [Install or regenerate the stack](#quick-start)
 - [Open Grafana and view a dashboard](#open-grafana-and-view-dashboards)
 - [Write `firewalls.yml` step by step](#write-firewallsyml-step-by-step)
@@ -48,6 +49,59 @@ The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB 
 - A local `firewalls.yml` file based on `firewalls_example.yml`
 
 Palo Alto MIB files are downloaded by the generator when needed and are ignored by Git.
+
+## Install on Ubuntu
+
+These steps prepare a fresh Ubuntu (22.04 or 24.04) host, then continue with the [Quick Start](#quick-start).
+
+1. Install Git and Python:
+
+   ```bash
+   sudo apt update
+   sudo apt install -y git python3 python3-venv
+   ```
+
+2. Clone the project (the repository is public, no GitHub account is needed):
+
+   ```bash
+   git clone https://github.com/tbortolossi/FW-Monitoring.git
+   cd FW-Monitoring
+   ```
+
+3. Install Docker Engine and the Compose plugin if they are missing. Either let the wrapper do it once with `sudo ./generate.sh` (it stops later if `.env` or `firewalls.yml` is not ready yet, which is fine), or use the official script:
+
+   ```bash
+   curl -fsSL https://get.docker.com | sudo sh
+   ```
+
+4. Allow your user to run Docker without `sudo`, then **log out and back in** so the new group applies:
+
+   ```bash
+   sudo usermod -aG docker $USER
+   ```
+
+   `sudo ./generate.sh` does this automatically for the user who ran it when it installs Docker. After reconnecting, check:
+
+   ```bash
+   groups      # must list "docker"
+   docker ps   # must answer without "permission denied"
+   ```
+
+   Run `./generate.sh` as your normal user afterwards, not with `sudo`, so generated files stay owned by you.
+
+5. Continue with the [Quick Start](#quick-start) from step 1.
+
+To update the project later, run `git pull` in the `FW-Monitoring` directory, read the upgrade notes below for the new version, and rerun `./generate.sh`.
+
+### Installation Troubleshooting
+
+| Message | Cause and fix |
+| --- | --- |
+| `permission denied while trying to connect to the docker API at unix:///var/run/docker.sock` | The user is not in the `docker` group, or has not logged in again since being added. Run `sudo usermod -aG docker $USER`, log out and back in, check `docker ps`. |
+| `Cannot connect to the Docker daemon` | The Docker service is stopped: `sudo systemctl enable --now docker`. |
+| `The virtual environment was not created successfully` | `python3-venv` is missing: `sudo apt install -y python3-venv`, then `rm -rf .venv` and rerun. |
+| `./generate.sh: Permission denied` | The execute bit was lost, for example when the project was copied from Windows, downloaded as a ZIP archive, or cloned before this fix. Run `chmod +x generate.sh`, or start it with `bash generate.sh`. |
+| `WARNING: .../grafana-data is not owned by the container UID 472` | Not blocking. For tighter permissions than mode `0777`: `sudo chown -R 472:472 grafana-data`. |
 
 ## Quick Start
 

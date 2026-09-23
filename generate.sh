@@ -71,6 +71,12 @@ install_docker_debian() {
   elif command -v service >/dev/null 2>&1; then
     service docker start
   fi
+
+  # Let the user who ran sudo use Docker without sudo after the next login.
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    usermod -aG docker "$SUDO_USER"
+    echo "Added $SUDO_USER to the docker group; log out and back in before running ./generate.sh without sudo."
+  fi
 }
 
 ensure_docker() {
