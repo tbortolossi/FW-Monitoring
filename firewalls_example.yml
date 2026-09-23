@@ -60,6 +60,18 @@
   priv_password: ${FGT_80F_SNMP_PRIV}
 
 #####################################################
+## API-only example (Palo Alto, no SNMP)
+#####################################################
+
+#- hostname: PA-API-ONLY
+#  host: 192.0.2.103
+#  vendor: paloalto
+#  snmp: false            # no SNMP polling; the XML API is the only source
+#  api_monitoring:
+#    enabled: true
+#    api_key: ${PALOALTO_API_KEY_PA_API_ONLY}
+
+#####################################################
 ## SNMPv2c examples
 #####################################################
 

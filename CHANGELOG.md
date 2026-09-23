@@ -4,6 +4,7 @@
 
 ### Added
 
+- API-only Palo Alto firewalls: `snmp: false` on an entry with `api_monitoring` enabled skips SNMP credentials, discovery and polling for that firewall, so a device reachable only over HTTPS is monitored by the XML API collector alone. It is rejected on Fortinet entries and without an enabled API block.
 - `README.md` has an "Install on Ubuntu" section (packages, `git clone`, Docker, `docker` group) and an installation troubleshooting table.
 - `generate.py` checks Palo Alto XML API access for every firewall with `api_monitoring` enabled: one read-only `show system info` per firewall, run in parallel, printing `API OK` with model and PAN-OS version, or why it failed (key rejected, untrusted TLS certificate, unreachable, missing key). The check never stops generation or prints the key; `API_CHECK=false` skips it and `API_CHECK_TIMEOUT` (default 5 s) bounds it.
 

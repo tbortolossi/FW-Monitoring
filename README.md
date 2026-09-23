@@ -327,6 +327,7 @@ Firewall entry:
 | `hostname` | yes | | Unique name; see the `sysName` note above. |
 | `host` | yes | | IP address or DNS name polled over SNMP (UDP/161); also used for the API unless `api_monitoring.host` is set. |
 | `vendor` | no | `paloalto` | `paloalto` or `fortinet` (aliases `panos`, `palo`, `palo_alto`, `fortigate`, `fortios`). |
+| `snmp` | no | `true` | Palo Alto only. `false` makes the entry API-only: no SNMP polling, discovery or credentials; requires `api_monitoring.enabled: true`. See [API-Only Firewalls](#api-only-firewalls). |
 | `snmp_version` | no | `2` | `2` (SNMPv2c) or `3`. |
 | `community` | SNMPv2c | | SNMPv2c community. |
 | `username` | SNMPv3 | | SNMPv3 user (not treated as a secret). |
@@ -676,6 +677,22 @@ API monitoring is configured independently for every Palo Alto entry. Firewalls 
   community: ${BORDEAUX_PA_01_SNMP_COMMUNITY}
   # No api_monitoring block: this firewall remains SNMP-only.
 ```
+
+### API-Only Firewalls
+
+A Palo Alto firewall that is reachable over HTTPS but not over SNMP can be monitored with the XML API alone. Set `snmp: false` and leave out every SNMP key:
+
+```yaml
+- hostname: MARSEILLE-PA-01
+  host: 192.0.2.104
+  vendor: paloalto
+  snmp: false
+  api_monitoring:
+    enabled: true
+    api_key: ${PALOALTO_API_KEY_MARSEILLE_PA_01}
+```
+
+`generate.py` then skips SNMP discovery for that entry and renders no `[[inputs.snmp]]` instance for it; only the API collector polls it. The firewall appears in the **Palo Alto API Performance Monitoring** (and, for PA-5450/7050/7080/7500, **Palo Alto API Chassis Monitoring**) dashboards, not in the SNMP dashboards. `snmp: false` without an enabled `api_monitoring` block, or on a Fortinet entry, is rejected.
 
 The collector serializes calls within one firewall and polls different firewalls in parallel, so a slow device does not block the others.
 

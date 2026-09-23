@@ -366,6 +366,11 @@ def api_runtime_environment_name(firewall):
     return f"PALOALTO_API_KEY_YAML_{label}_{suffix}"
 
 
+def snmp_enabled(firewall):
+    """False only for API-only Palo Alto entries declared with snmp: false."""
+    return firewall.get("snmp", True) is not False
+
+
 def validate_api_monitoring(firewall, label):
     config = firewall.get("api_monitoring")
     if config is None:
@@ -469,6 +474,20 @@ def validate_inventory(firewalls):
 
         validate_api_monitoring(firewall, label)
 
+        if "snmp" in firewall:
+            try:
+                firewall["snmp"] = normalize_boolean(firewall["snmp"], default=True)
+            except ValueError as exc:
+                raise SystemExit(f"ERROR: {label}: snmp must be true or false.") from exc
+        if not snmp_enabled(firewall):
+            # API-only entry: no SNMP polling, discovery or credentials. The
+            # XML API collector is then the only source of data.
+            if vendor != "paloalto" or not firewall["api_monitoring"]["enabled"]:
+                raise SystemExit(
+                    f"ERROR: {label}: snmp: false requires a Palo Alto firewall with api_monitoring enabled."
+                )
+            continue
+
         try:
             firewall["snmp_version"] = int(firewall.get("snmp_version", 2))
         except (TypeError, ValueError) as exc:
@@ -516,7 +535,7 @@ def enrich_inventory(firewalls):
     by the operator in firewalls.yml are always preserved.
     """
     for firewall in firewalls:
-        if normalize_vendor(firewall.get("vendor")) != "paloalto":
+        if normalize_vendor(firewall.get("vendor")) != "paloalto" or not snmp_enabled(firewall):
             continue
 
         panos_version = firewall.get("panos_version")
@@ -715,7 +734,7 @@ def discover_paloalto_devices(firewalls, vendors):
     if SNMP_DISCOVERY != "true":
         print(f"SNMP discovery disabled (SNMP_DISCOVERY={SNMP_DISCOVERY})")
         return
-    if "paloalto" not in vendors:
+    if "paloalto" not in vendors or "paloalto" not in snmp_vendors(firewalls):
         return
 
     print("Running best-effort Palo Alto SNMP discovery...")
@@ -729,6 +748,9 @@ def discover_paloalto_devices(firewalls, vendors):
 
         host = firewall.get("host", "")
         hostname = firewall.get("hostname") or host
+        if not snmp_enabled(firewall):
+            print(f"    {hostname}: API-only (snmp: false), skipping SNMP discovery.")
+            continue
         if not host:
             print(f"    {hostname}: missing host, skipping discovery.")
             continue
@@ -808,6 +830,11 @@ def discover_fortinet_devices(firewalls, vendors):
         print(f"    {hostname}: SNMP OK{', model ' + model if model else ''}{', FortiOS ' + fortios_version if fortios_version else ''}")
 
 
+def snmp_vendors(firewalls):
+    """Vendors that have at least one firewall polled over SNMP."""
+    return {firewall.get("vendor", "paloalto") for firewall in firewalls if snmp_enabled(firewall)}
+
+
 def detect_vendors(firewalls):
     print("Analyzing declared firewalls...")
     vendors = sorted({firewall.get("vendor", "paloalto") for firewall in firewalls})
@@ -816,8 +843,8 @@ def detect_vendors(firewalls):
 
 
 def prepare_paloalto_mibs(firewalls, vendors):
-    if "paloalto" not in vendors:
-        print("No Palo Alto firewall declared; skipping Palo Alto MIB step.")
+    if "paloalto" not in vendors or "paloalto" not in snmp_vendors(firewalls):
+        print("No Palo Alto firewall polled over SNMP; skipping Palo Alto MIB step.")
         return
 
     print("Preparing Palo Alto MIBs...")
@@ -825,7 +852,7 @@ def prepare_paloalto_mibs(firewalls, vendors):
         {
             "-".join(str(firewall["panos_version"]).split(".")[:2])
             for firewall in firewalls
-            if firewall.get("vendor") == "paloalto" and firewall.get("panos_version")
+            if firewall.get("vendor") == "paloalto" and snmp_enabled(firewall) and firewall.get("panos_version")
         }
     )
     if not versions:
@@ -927,11 +954,14 @@ def render_telegraf(firewalls, vendors):
     print("Generating telegraf.conf...")
 
     context = {"firewalls": firewalls}
+    # API-only firewalls (snmp: false) get no [[inputs.snmp]] instance.
+    snmp_context = {"firewalls": [firewall for firewall in firewalls if snmp_enabled(firewall)]}
+    polled_vendors = snmp_vendors(firewalls)
     parts = [render_template("header.tmpl", context)]
-    if "paloalto" in vendors:
-        parts.append(render_template("inputs_paloalto.tmpl", context))
-    if "fortinet" in vendors:
-        parts.append(render_template("inputs_fortinet.tmpl", context))
+    if "paloalto" in vendors and "paloalto" in polled_vendors:
+        parts.append(render_template("inputs_paloalto.tmpl", snmp_context))
+    if "fortinet" in vendors and "fortinet" in polled_vendors:
+        parts.append(render_template("inputs_fortinet.tmpl", snmp_context))
     if any(firewall.get("api_monitoring", {}).get("enabled") for firewall in firewalls):
         parts.append(render_template("inputs_paloalto_api.tmpl", context))
 
@@ -1021,7 +1051,12 @@ def render_paloalto_api_environment(firewalls, source=None):
     rendered_firewalls = copy.deepcopy(firewalls)
     missing = []
     for firewall, rendered_firewall in zip(firewalls, rendered_firewalls):
-        secret_fields = ("community",) if firewall.get("snmp_version") == 2 else ("auth_password", "priv_password")
+        if not snmp_enabled(firewall):
+            secret_fields = ()
+        elif firewall.get("snmp_version") == 2:
+            secret_fields = ("community",)
+        else:
+            secret_fields = ("auth_password", "priv_password")
         for field in secret_fields:
             value = firewall.get(field)
             if value is None:
