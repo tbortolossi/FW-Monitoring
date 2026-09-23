@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `generate.py` now restarts Telegraf after `docker compose up -d`. `telegraf.conf` and `paloalto-api.json` are bind mounts, so Compose did not recreate the container when only their content changed and a rerun of `./generate.sh` (new firewall, `verify_tls: false`, changed credentials) was silently ignored until a manual `docker compose restart telegraf`.
+
 ## 1.3.0 - 2026-09-23
 
 ### Added

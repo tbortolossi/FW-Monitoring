@@ -490,6 +490,7 @@ class GeneratorCoreTests(unittest.TestCase):
             [
                 ["docker", "compose", "build", "telegraf"],
                 ["docker", "compose", "up", "-d"],
+                ["docker", "compose", "restart", "telegraf"],
                 ["docker", "compose", "ps"],
             ],
         )
