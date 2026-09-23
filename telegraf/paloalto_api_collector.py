@@ -349,6 +349,28 @@ def _result_text(result: ET.Element) -> str:
     return "\n".join(text for text in result.itertext() if text and text.strip())
 
 
+_TOP_SUMMARY_UNITS = {"kib": 1024, "mib": 1024**2, "gib": 1024**3, "tib": 1024**4}
+
+
+def _top_summary_bytes(text: str, label: str):
+    """Parse a procps-ng summary line such as `MiB Mem : 1000 total, 250 free, 750 used`.
+
+    top appends `+` to a value wider than its column. When only decimals were dropped
+    (`1031206.+total`, seen on PA-5580 management planes) the value is exact to one unit
+    and is kept; when integer digits may be missing (`13184950+total`) the line is ignored.
+    """
+    line = re.search(rf"\b(KiB|MiB|GiB|TiB)\s+{label}\s*:(.*)", text, re.I)
+    if not line:
+        return None
+    multiplier = _TOP_SUMMARY_UNITS[line.group(1).lower()]
+    values = {}
+    for number, truncated, name in re.findall(r"([\d.]+)(\+?)\s*(total|free|used)\b", line.group(2), re.I):
+        if truncated and "." not in number:
+            return None
+        values[name.lower()] = float(number) * multiplier
+    return values if len(values) == 3 else None
+
+
 def parse_management_resources(result: ET.Element) -> dict:
     text = _result_text(result)
     fields = {}
@@ -381,19 +403,15 @@ def parse_management_resources(result: ET.Element) -> dict:
             tasks_stopped=int(tasks.group(4)),
             tasks_zombie=int(tasks.group(5)),
         )
-    memory = re.search(
-        r"(KiB|MiB|GiB)\s+Mem\s*:\s*([\d.]+)\s+total,\s*([\d.]+)\s+free,\s*([\d.]+)\s+used",
-        text,
-        re.I,
-    )
+    memory = _top_summary_bytes(text, "Mem")
     if memory:
-        multiplier = {"kib": 1024, "mib": 1024**2, "gib": 1024**3}[memory.group(1).lower()]
-        total = float(memory.group(2)) * multiplier
-        free = float(memory.group(3)) * multiplier
-        used = float(memory.group(4)) * multiplier
-        fields.update(memory_total_bytes=total, memory_free_bytes=free, memory_used_bytes=used)
-        if total:
-            fields["memory_used_pct"] = used / total * 100.0
+        fields.update(
+            memory_total_bytes=memory["total"],
+            memory_free_bytes=memory["free"],
+            memory_used_bytes=memory["used"],
+        )
+        if memory["total"]:
+            fields["memory_used_pct"] = memory["used"] / memory["total"] * 100.0
     else:
         legacy = re.search(
             r"Mem\s*:\s*([\d.]+)([kmg])?\s+total,\s*([\d.]+)([kmg])?\s+used,\s*([\d.]+)([kmg])?\s+free",
@@ -408,18 +426,10 @@ def parse_management_resources(result: ET.Element) -> dict:
             fields.update(memory_total_bytes=total, memory_free_bytes=free, memory_used_bytes=used)
             if total:
                 fields["memory_used_pct"] = used / total * 100.0
-    swap = re.search(
-        r"(KiB|MiB|GiB)\s+Swap\s*:\s*([\d.]+)\s+total,\s*([\d.]+)\s+free,\s*([\d.]+)\s+used",
-        text,
-        re.I,
-    )
+    swap = _top_summary_bytes(text, "Swap")
     if swap:
-        multiplier = {"kib": 1024, "mib": 1024**2, "gib": 1024**3}[swap.group(1).lower()]
-        total = float(swap.group(2)) * multiplier
-        free = float(swap.group(3)) * multiplier
-        used = float(swap.group(4)) * multiplier
-        fields.update(swap_total_bytes=total, swap_free_bytes=free, swap_used_bytes=used)
-        fields["swap_used_pct"] = used / total * 100.0 if total else 0.0
+        fields.update(swap_total_bytes=swap["total"], swap_free_bytes=swap["free"], swap_used_bytes=swap["used"])
+        fields["swap_used_pct"] = swap["used"] / swap["total"] * 100.0 if swap["total"] else 0.0
     return fields
 
 
