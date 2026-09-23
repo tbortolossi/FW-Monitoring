@@ -33,6 +33,7 @@ The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB 
 - [Generate a Palo Alto API key and choose where it is stored](#generate-a-key-with-paloalto_api_keypy)
 - [Upgrade from v1.0.2 (SNMP-only, May 2026)](#upgrade-from-v102-snmp-only-may-2026)
 - [Upgrade from v1.1.0](#upgrade-from-v110)
+- [Upgrade from v1.2.0](#upgrade-from-v120)
 - [Upgrade any other installation](#upgrade-an-existing-installation)
 
 ## Requirements
@@ -892,6 +893,18 @@ For installations made from the `v1.1.0` tag (Sep 2026). Follow the same steps a
 - **`pa_cluster` gate.** v1.1.0 polled `pan_pa_cluster` on every PAN-OS 11.2+ firewall. It is now opt-in: add `pa_cluster: true` to the PA-cluster members that should keep that table.
 - **Dataplane CPU semantics.** Per-core `cpu_pct` is now the one-minute average from `resource-monitor minute last 1` (it was a one-second sample), and a new `cpu_max_pct` field holds the one-minute peak. Curves become smoother after the upgrade.
 - **Also new since v1.1.0:** Alpine Telegraf image, Grafana 13.2.2, InfluxDB on `127.0.0.1:8086`, the 20 s/60 s SNMP split, `fortinet_hw_sensors.value` as a float, and new optional API categories (ingress backlogs, logging, GlobalProtect, software, RAID) that switch themselves off on platforms that reject them. Each of these is described in the v1.0.2 section above.
+
+## Upgrade from v1.2.0
+
+For installations made from the `v1.2.0` tag (Sep 2026). No behavior, inventory, or secret format changes: pull the project files and regenerate, which rebuilds the Telegraf image (the API collector gained per-VSYS CPS and logical interface counters) and re-provisions the dashboards:
+
+```bash
+git pull --ff-only
+./generate.sh
+docker compose ps
+```
+
+The new `paloalto_api_vsys` fields and panels fill in after the first API polls; existing data is unaffected.
 
 ## Upgrade an Existing Installation
 
