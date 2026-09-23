@@ -164,9 +164,8 @@ def check_docker():
     if "permission denied" in result.stderr.lower():
         raise SystemExit(
             "ERROR: this user cannot access the Docker daemon (permission denied on /var/run/docker.sock).\n"
-            "Add the user to the docker group, then log out and back in:\n"
-            "  sudo usermod -aG docker $USER\n"
-            "Check with `docker ps`, then rerun ./generate.sh (do not run it with sudo)."
+            "If the user is already in the docker group, run ./generate.sh: it picks the group up without a new login.\n"
+            "Otherwise run `sudo ./generate.sh` once to add the user to the docker group, then ./generate.sh again."
         )
     raise SystemExit(
         "ERROR: the Docker daemon is not reachable:\n"

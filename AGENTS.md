@@ -27,7 +27,7 @@ Keep changes aligned with that goal: simple install, clear configuration, reliab
 - `firewalls.yml`: user-facing inventory for Palo Alto and Fortinet devices; `firewalls_example.yml` is the committed sample.
 - `.firewalls.generated.yml`: generated inventory enriched from `firewalls.yml`; credentials redacted, mode `0600`, ignored by Git and safe to recreate.
 - `generate.py`: main Python generator. It checks Docker, resolves `${VARIABLE}` references, runs SNMP discovery, enriches inventory, prepares MIBs, writes the API runtime files, renders `telegraf/telegraf.conf`, builds Telegraf, and starts the stack.
-- `generate.sh`: optional convenience wrapper that creates a local `.venv`, installs `requirements.txt`, and executes `generate.py`.
+- `generate.sh`: optional convenience wrapper that creates a local `.venv`, installs `requirements.txt`, and executes `generate.py`. Under `sudo` it only prepares the host (installs Docker on Debian/Ubuntu, adds `$SUDO_USER` to the `docker` group) and stops, so project files never become root-owned; as a normal user it refuses root-owned project files and restarts itself through `sg docker` when the user is in the group but the session is not. Its functions are sourced by `tests/test_generate_wrapper.py`; keep `main` behind the `BASH_SOURCE` guard.
 - `paloalto_api_key.py`: PAN-OS API key helper; stores the key in `.env` (default `--storage env`) and writes an `${PALOALTO_API_KEY_<HOSTNAME>}` reference into `firewalls.yml`.
 - `telegraf/header.tmpl`: common Telegraf agent (20 s interval) and InfluxDB output config.
 - `telegraf/inputs_paloalto.tmpl`, `telegraf/inputs_fortinet.tmpl`: plain Jinja2 SNMP input templates (two instances per firewall, see below).
