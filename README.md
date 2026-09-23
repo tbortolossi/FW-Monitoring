@@ -69,26 +69,28 @@ These steps prepare a fresh Ubuntu (22.04 or 24.04) host, then continue with the
    cd FW-Monitoring
    ```
 
-3. Install Docker Engine and the Compose plugin if they are missing. Either let the wrapper do it once with `sudo ./generate.sh` (it stops later if `.env` or `firewalls.yml` is not ready yet, which is fine), or use the official script:
+3. Prepare Docker once with sudo:
 
    ```bash
-   curl -fsSL https://get.docker.com | sudo sh
+   sudo ./generate.sh
    ```
 
-4. Allow your user to run Docker without `sudo`, then **log out and back in** so the new group applies:
+   This installs Docker Engine and the Compose plugin from the official Docker repository if they are missing, and adds your user to the `docker` group, also when Docker was already installed. It then stops without generating anything, so that `.venv` and the generated files are not owned by root. Members of the `docker` group can control the Docker daemon, which is root-equivalent access to the host: only add trusted operators.
+
+4. Run the generator as your normal user, without `sudo`:
 
    ```bash
-   sudo usermod -aG docker $USER
+   ./generate.sh
    ```
 
-   `sudo ./generate.sh` does this automatically for the user who ran it when it installs Docker. After reconnecting, check:
+   You do not need to log out first: if the current session does not have the `docker` group yet, the wrapper restarts itself with `sg docker` for this run. Log out and back in at some point so that plain `docker` commands work in your shell too, then check:
 
    ```bash
    groups      # must list "docker"
    docker ps   # must answer without "permission denied"
    ```
 
-   Run `./generate.sh` as your normal user afterwards, not with `sudo`, so generated files stay owned by you.
+   Always run `./generate.sh` as your normal user after the first `sudo` run.
 
 5. Continue with the [Quick Start](#quick-start) from step 1.
 
@@ -98,7 +100,8 @@ To update the project later, run `git pull` in the `FW-Monitoring` directory, re
 
 | Message | Cause and fix |
 | --- | --- |
-| `permission denied while trying to connect to the docker API at unix:///var/run/docker.sock` | The user is not in the `docker` group, or has not logged in again since being added. Run `sudo usermod -aG docker $USER`, log out and back in, check `docker ps`. |
+| `permission denied while trying to connect to the docker API at unix:///var/run/docker.sock` | The user is not in the `docker` group. Run `sudo ./generate.sh` once, then `./generate.sh`. If you run `generate.py` or `docker` directly right after being added, log out and back in first; `./generate.sh` does not need it. |
+| `these project files belong to root, left over from an earlier 'sudo ./generate.sh'` | An older version of the wrapper kept running as root and created `.venv` or generated files owned by root. Run the `sudo chown -R ...` command printed by the wrapper, then `./generate.sh`. |
 | `Cannot connect to the Docker daemon` | The Docker service is stopped: `sudo systemctl enable --now docker`. |
 | `The virtual environment was not created successfully` | `python3-venv` is missing: `sudo apt install -y python3-venv`, then `rm -rf .venv` and rerun. |
 | `./generate.sh: Permission denied` | The execute bit was lost, for example when the project was copied from Windows, downloaded as a ZIP archive, or cloned before this fix. Run `chmod +x generate.sh`, or start it with `bash generate.sh`. |
@@ -189,7 +192,7 @@ To update the project later, run `git pull` in the `FW-Monitoring` directory, re
    ./generate.sh
    ```
 
-   The wrapper creates `.venv`, installs the Python requirements, then runs `generate.py`. If Docker is missing on a Debian/Ubuntu host, run it once with `sudo ./generate.sh`: it installs Docker Engine and the Compose plugin from the official Docker repository, then continues. After the first run you can call `.venv/bin/python generate.py` directly.
+   The wrapper creates `.venv`, installs the Python requirements, then runs `generate.py`. If Docker is missing, or your user cannot use it yet, on a Debian/Ubuntu host, run `sudo ./generate.sh` once: it installs Docker if needed, adds your user to the `docker` group and stops. Then run `./generate.sh` again without `sudo`. After the first run you can call `.venv/bin/python generate.py` directly.
 
 5. [Open Grafana and select a dashboard](#open-grafana-and-view-dashboards).
 

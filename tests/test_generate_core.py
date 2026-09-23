@@ -542,7 +542,7 @@ class GeneratorCoreTests(unittest.TestCase):
 
     def test_check_docker_reports_socket_permission_denied(self):
         stderr = "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock\n"
-        with self.assertRaisesRegex(SystemExit, r"usermod -aG docker \$USER"):
+        with self.assertRaisesRegex(SystemExit, r"sudo \./generate\.sh"):
             self._check_docker_with_info(1, stderr)
 
     def test_check_docker_reports_stopped_daemon(self):
