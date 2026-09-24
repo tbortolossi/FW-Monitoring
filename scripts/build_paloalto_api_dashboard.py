@@ -556,7 +556,7 @@ from(bucket: "firewalls")
   |> group(columns: ["_time", "_field"])
   |> sum()
   |> group(columns: ["_field"])
-''', 0, 25, 14, 10, "bps", "Total throughput calculated from PAN-OS hardware interface octet counters."),
+''', 0, 25, 14, 10, "bps", "Total throughput of the physical Ethernet ports, calculated from the MAC-level port octet counters of show counter interface all. These include hardware-offloaded flows, which the dataplane ibytes/obytes counters and the session throughput summary miss."),
         interface_load,
         guide_lines(percent_range(timeseries(3011, "Dataplane Resource Pressure", '''
 from(bucket: "firewalls")
@@ -824,7 +824,7 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 0, 12, 7, "bps", "Repeated for every active physical Ethernet port (hardware ibytes/obytes) and every logical interface with counters: subinterfaces, tunnels, VLAN, loopback and aggregate interfaces (ifnet counters of show counter interface all)."), "interface", max_per_row=2),
+''', 0, 0, 12, 7, "bps", "Repeated for every active physical Ethernet port (MAC-level port rx-bytes/tx-bytes, including offloaded flows) and every logical interface with counters: subinterfaces, tunnels, VLAN, loopback and aggregate interfaces (ifnet counters of show counter interface all)."), "interface", max_per_row=2),
         ]),
         row(9008, "API Interface Details", 0, [
             timeseries(9, "Packets per Second by Interface", '''

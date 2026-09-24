@@ -1041,7 +1041,7 @@
       ],
       "title": "Throughput Global Interfaces",
       "type": "timeseries",
-      "description": "Total throughput calculated from PAN-OS hardware interface octet counters.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
+      "description": "Total throughput of the physical Ethernet ports, calculated from the MAC-level port octet counters of show counter interface all. These include hardware-offloaded flows, which the dataplane ibytes/obytes counters and the session throughput summary miss.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
     },
     {
       "datasource": {
@@ -3003,7 +3003,7 @@
           ],
           "title": "Throughput ${interface}",
           "type": "timeseries",
-          "description": "Repeated for every active physical Ethernet port (hardware ibytes/obytes) and every logical interface with counters: subinterfaces, tunnels, VLAN, loopback and aggregate interfaces (ifnet counters of show counter interface all).\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default.",
+          "description": "Repeated for every active physical Ethernet port (MAC-level port rx-bytes/tx-bytes, including offloaded flows) and every logical interface with counters: subinterfaces, tunnels, VLAN, loopback and aggregate interfaces (ifnet counters of show counter interface all).\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default.",
           "repeat": "interface",
           "repeatDirection": "h",
           "maxPerRow": 2
