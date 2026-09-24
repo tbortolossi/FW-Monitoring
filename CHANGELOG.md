@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.4 - 2026-09-24
+
+### Fixed
+
+- The **CPU vs Throughput** scatter plot of the Load Test section was still empty after 1.4.3. The panel declared no `pluginVersion`, so Grafana applied the pre-11.1 XY Chart migration, which expects the old string-based series format and left the panel with no field to plot. The five scatter panels now declare `pluginVersion` 11.1.0 and the frame matcher Grafana writes itself; Grafana reloads the provisioned files.
+
 ## 1.4.3 - 2026-09-24
 
 ### Fixed
