@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0 - 2026-09-24
+
+### Added
+
+- **DP CPU (active cores)** on the Palo Alto API dashboards (standard and chassis): a tile next to **DP CPU (avg)**, a line in **CPU MP / DP**, and a series in the Load Test ramp and CPU vs Throughput scatter plot. PAN-OS lists every core of a dataplane in `resource-monitor`, but only the pan task cores process packets (80 of the 128 listed on a PA-5580 dataplane); the others stay at 0% and pull down the all-core average, which is also the value SNMP reports. During a PA-5580 load test the all-core average read 45% while the packet-processing cores ran at 72%. The collector now writes `cpu_active_pct` (mean of the cores with any load during the minute) and `active_cores` on each dataplane's `core=average` point; the all-core value is unchanged and still matches SNMP. The overview strip now holds nine tiles. Rebuild the Telegraf image (`./generate.sh`) to apply.
+
 ## 1.4.5 - 2026-09-24
 
 ### Fixed
