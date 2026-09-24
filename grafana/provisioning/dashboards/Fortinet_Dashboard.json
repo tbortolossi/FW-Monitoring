@@ -1183,6 +1183,12 @@
             "mapping": "manual",
             "series": [
               {
+                "frame": {
+                  "matcher": {
+                    "id": "byIndex",
+                    "options": 0
+                  }
+                },
                 "x": {
                   "matcher": {
                     "id": "byName",
@@ -1200,6 +1206,12 @@
                 }
               },
               {
+                "frame": {
+                  "matcher": {
+                    "id": "byIndex",
+                    "options": 0
+                  }
+                },
                 "x": {
                   "matcher": {
                     "id": "byName",
@@ -1240,7 +1252,8 @@
           ],
           "title": "CPU vs Throughput",
           "type": "xychart",
-          "description": "CPU as a function of the received throughput, one point per minute of the selected range: the CPU-versus-throughput curve of a performance test report. Points that pile up at 100% CPU mark the maximum throughput of the platform for this traffic mix."
+          "description": "CPU as a function of the received throughput, one point per minute of the selected range: the CPU-versus-throughput curve of a performance test report. Points that pile up at 100% CPU mark the maximum throughput of the platform for this traffic mix.",
+          "pluginVersion": "11.1.0"
         },
         {
           "datasource": {
@@ -2080,6 +2093,6 @@
   "timezone": "",
   "title": "Fortinet Firewall Monitoring",
   "uid": "fortinet-firewall-monitoring",
-  "version": 16,
+  "version": 17,
   "weekStart": ""
 }

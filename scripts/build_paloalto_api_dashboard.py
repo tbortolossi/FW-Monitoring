@@ -212,6 +212,10 @@ def xychart(panel_id: int, title: str, query: str, x: int, y: int, w: int, h: in
     to those display names because Grafana matches fields by display name
     once overrides are applied (a matcher on the raw column name finds
     nothing and the panel shows "No data").
+
+    ``pluginVersion`` is required: without it Grafana runs the pre-11.1
+    XY Chart migration, which expects the old string-based series format,
+    wraps the matcher objects into byName matchers and empties the panel.
     """
     x_label = x_label or x_field
     return {
@@ -240,6 +244,7 @@ def xychart(panel_id: int, title: str, query: str, x: int, y: int, w: int, h: in
             "mapping": "manual",
             "series": [
                 {
+                    "frame": {"matcher": {"id": "byIndex", "options": 0}},
                     "x": {"matcher": {"id": "byName", "options": x_label}},
                     "y": {"matcher": {"id": "byName", "options": label}},
                     "name": {"fixed": label},
@@ -249,6 +254,7 @@ def xychart(panel_id: int, title: str, query: str, x: int, y: int, w: int, h: in
             "legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": True},
             "tooltip": {"mode": "single", "sort": "none"},
         },
+        "pluginVersion": "11.1.0",
         "targets": [target(query)],
         "title": title,
         "type": "xychart",

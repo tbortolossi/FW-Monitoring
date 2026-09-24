@@ -165,6 +165,11 @@ class DashboardProvisioningTests(unittest.TestCase):
                 scatter = next(panel for panel in panels if panel["type"] == "xychart")
                 self.assertEqual(scatter["title"], "CPU vs Throughput")
                 self.assertEqual(scatter["options"]["mapping"], "manual")
+                # Without a plugin version Grafana applies the pre-11.1 XY Chart
+                # migration, which breaks the matcher-based series mapping.
+                self.assertGreaterEqual(float(scatter["pluginVersion"].rsplit(".", 1)[0]), 11.1)
+                for series in scatter["options"]["series"]:
+                    self.assertEqual(series["frame"], {"matcher": {"id": "byIndex", "options": 0}})
                 display_names = {
                     item["matcher"]["options"]: prop["value"]
                     for item in scatter["fieldConfig"]["overrides"]

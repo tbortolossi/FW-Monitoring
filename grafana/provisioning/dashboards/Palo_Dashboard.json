@@ -1156,6 +1156,12 @@
             "mapping": "manual",
             "series": [
               {
+                "frame": {
+                  "matcher": {
+                    "id": "byIndex",
+                    "options": 0
+                  }
+                },
                 "x": {
                   "matcher": {
                     "id": "byName",
@@ -1173,6 +1179,12 @@
                 }
               },
               {
+                "frame": {
+                  "matcher": {
+                    "id": "byIndex",
+                    "options": 0
+                  }
+                },
                 "x": {
                   "matcher": {
                     "id": "byName",
@@ -1213,7 +1225,8 @@
           ],
           "title": "CPU vs Throughput",
           "type": "xychart",
-          "description": "Dataplane CPU as a function of the received throughput, one point per minute of the selected range: the CPU-versus-throughput curve of a performance test report. Points that pile up at 100% CPU mark the maximum throughput of the platform for this traffic mix."
+          "description": "Dataplane CPU as a function of the received throughput, one point per minute of the selected range: the CPU-versus-throughput curve of a performance test report. Points that pile up at 100% CPU mark the maximum throughput of the platform for this traffic mix.",
+          "pluginVersion": "11.1.0"
         },
         {
           "datasource": {
@@ -3068,6 +3081,6 @@
   "timezone": "",
   "title": "Palo Alto Firewall Monitoring",
   "uid": "palo-firewall-monitoring",
-  "version": 24,
+  "version": 25,
   "weekStart": ""
 }

@@ -2252,6 +2252,12 @@
             "mapping": "manual",
             "series": [
               {
+                "frame": {
+                  "matcher": {
+                    "id": "byIndex",
+                    "options": 0
+                  }
+                },
                 "x": {
                   "matcher": {
                     "id": "byName",
@@ -2269,6 +2275,12 @@
                 }
               },
               {
+                "frame": {
+                  "matcher": {
+                    "id": "byIndex",
+                    "options": 0
+                  }
+                },
                 "x": {
                   "matcher": {
                     "id": "byName",
@@ -2297,6 +2309,7 @@
               "sort": "none"
             }
           },
+          "pluginVersion": "11.1.0",
           "targets": [
             {
               "datasource": {
