@@ -165,7 +165,18 @@ class DashboardProvisioningTests(unittest.TestCase):
                 scatter = next(panel for panel in panels if panel["type"] == "xychart")
                 self.assertEqual(scatter["title"], "CPU vs Throughput")
                 self.assertEqual(scatter["options"]["mapping"], "manual")
-                self.assertTrue(all(series["x"]["matcher"]["options"] == "throughput_bps" for series in scatter["options"]["series"]))
+                display_names = {
+                    item["matcher"]["options"]: prop["value"]
+                    for item in scatter["fieldConfig"]["overrides"]
+                    for prop in item["properties"]
+                    if prop["id"] == "displayName"
+                }
+                # Series matchers must use the display names set by the overrides,
+                # otherwise Grafana finds no field and the panel shows "No data".
+                for series in scatter["options"]["series"]:
+                    self.assertEqual(series["x"]["matcher"]["options"], display_names["throughput_bps"])
+                    self.assertIn(series["y"]["matcher"]["options"], display_names.values())
+                    self.assertNotIn(series["y"]["matcher"]["options"], display_names)
                 self.assertEqual(len([panel for panel in panels if panel["type"] == "timeseries"]), 4)
 
     def test_dashboard_provider_points_at_provisioning_directory(self):

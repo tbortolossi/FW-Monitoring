@@ -1186,13 +1186,13 @@
                 "x": {
                   "matcher": {
                     "id": "byName",
-                    "options": "throughput_bps"
+                    "options": "Throughput received"
                   }
                 },
                 "y": {
                   "matcher": {
                     "id": "byName",
-                    "options": "cpu_pct"
+                    "options": "CPU"
                   }
                 },
                 "name": {
@@ -1203,13 +1203,13 @@
                 "x": {
                   "matcher": {
                     "id": "byName",
-                    "options": "throughput_bps"
+                    "options": "Throughput received"
                   }
                 },
                 "y": {
                   "matcher": {
                     "id": "byName",
-                    "options": "hottest_cpu_pct"
+                    "options": "Hottest processor"
                   }
                 },
                 "name": {
@@ -2080,6 +2080,6 @@
   "timezone": "",
   "title": "Fortinet Firewall Monitoring",
   "uid": "fortinet-firewall-monitoring",
-  "version": 15,
+  "version": 16,
   "weekStart": ""
 }

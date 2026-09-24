@@ -2255,13 +2255,13 @@
                 "x": {
                   "matcher": {
                     "id": "byName",
-                    "options": "throughput_bps"
+                    "options": "Throughput received"
                   }
                 },
                 "y": {
                   "matcher": {
                     "id": "byName",
-                    "options": "dp_cpu_pct"
+                    "options": "DP CPU (average)"
                   }
                 },
                 "name": {
@@ -2272,13 +2272,13 @@
                 "x": {
                   "matcher": {
                     "id": "byName",
-                    "options": "throughput_bps"
+                    "options": "Throughput received"
                   }
                 },
                 "y": {
                   "matcher": {
                     "id": "byName",
-                    "options": "hottest_core_pct"
+                    "options": "Hottest DP core"
                   }
                 },
                 "name": {

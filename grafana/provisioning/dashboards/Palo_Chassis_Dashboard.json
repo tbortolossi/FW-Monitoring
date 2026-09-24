@@ -1159,13 +1159,13 @@
                 "x": {
                   "matcher": {
                     "id": "byName",
-                    "options": "throughput_bps"
+                    "options": "Throughput received"
                   }
                 },
                 "y": {
                   "matcher": {
                     "id": "byName",
-                    "options": "dp_cpu_pct"
+                    "options": "DP CPU"
                   }
                 },
                 "name": {
@@ -1176,13 +1176,13 @@
                 "x": {
                   "matcher": {
                     "id": "byName",
-                    "options": "throughput_bps"
+                    "options": "Throughput received"
                   }
                 },
                 "y": {
                   "matcher": {
                     "id": "byName",
-                    "options": "hottest_cpu_pct"
+                    "options": "Hottest DP processor"
                   }
                 },
                 "name": {
@@ -3855,6 +3855,6 @@
   "timezone": "browser",
   "title": "Palo Alto Chassis Monitoring",
   "uid": "palo-chassis-monitoring",
-  "version": 24,
+  "version": 25,
   "weekStart": ""
 }
