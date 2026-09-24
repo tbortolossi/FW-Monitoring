@@ -711,13 +711,13 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "management = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"mp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Management plane\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\naverages = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane + \" average\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane + \" hottest core\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\npeaks = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_max_pct\" and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane + \" hottest core (peak)\", _value: float(v: r._value) }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\nunion(tables: [management, averages, hottest, peaks])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+          "query": "management = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"mp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Management plane\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\ndataplanes = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\noverall = dataplanes\n  |> group(columns: [\"_time\"])\n  |> reduce(identity: {total: 0.0, count: 0}, fn: (r, accumulator) => ({ total: accumulator.total + r._value, count: accumulator.count + 1 }))\n  |> filter(fn: (r) => r.count > 1)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"All dataplanes (average)\", _value: r.total / float(v: r.count) }))\n  |> group(columns: [\"_field\"])\n  |> sort(columns: [\"_time\"])\nunion(tables: [management, overall, dataplanes])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
           "refId": "A"
         }
       ],
       "title": "CPU MP / DP",
       "type": "timeseries",
-      "description": "Management-plane CPU, the all-core average of every dataplane (equivalent to SNMP), the busiest core of every dataplane (one-minute average) and its peak within the minute. Dashed lines mark 70% and 90%. Per-core curves are in the repeated Dataplane rows.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show system resources` every 1 min\n- `show running resource-monitor minute last 1` every 1 min"
+      "description": "Management-plane CPU, the average of all dataplanes (only when the firewall has more than one) and the all-core average of each dataplane (equivalent to SNMP). Dashed lines mark 70% and 90%. The Hottest DP Core tile and the Dataplanes row show per-core load and imbalance.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show system resources` every 1 min\n- `show running resource-monitor minute last 1` every 1 min"
     },
     {
       "datasource": {
@@ -1067,6 +1067,10 @@
               {
                 "id": "displayName",
                 "value": "Interface"
+              },
+              {
+                "id": "custom.width",
+                "value": 110
               }
             ]
           },
@@ -1083,6 +1087,14 @@
               {
                 "id": "unit",
                 "value": "bps"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 75
               }
             ]
           },
@@ -1103,6 +1115,10 @@
               {
                 "id": "decimals",
                 "value": 1
+              },
+              {
+                "id": "custom.width",
+                "value": 85
               }
             ]
           },
@@ -1123,6 +1139,10 @@
               {
                 "id": "decimals",
                 "value": 1
+              },
+              {
+                "id": "custom.width",
+                "value": 85
               }
             ]
           },
@@ -1159,6 +1179,10 @@
                   "mode": "basic",
                   "valueDisplayMode": "text"
                 }
+              },
+              {
+                "id": "custom.width",
+                "value": 100
               },
               {
                 "id": "thresholds",
@@ -1223,6 +1247,10 @@
                 }
               },
               {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
@@ -1247,18 +1275,6 @@
                 "value": {
                   "mode": "thresholds"
                 }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "peak_pct"
-            },
-            "properties": [
-              {
-                "id": "custom.hidden",
-                "value": true
               }
             ]
           }
@@ -1290,7 +1306,25 @@
       ],
       "title": "Interface Load (last 5 minutes)",
       "type": "table",
-      "description": "Current link utilization of every physical port with a negotiated speed, busiest first. Calculated from hardware octet counters and the speed reported by show interface all.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter interface all` every 20 s\n- `show interface all` every 1 min"
+      "description": "Current link utilization of every physical port with a negotiated speed, busiest first. Calculated from hardware octet counters and the speed reported by show interface all.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter interface all` every 20 s\n- `show interface all` every 1 min",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "peak_pct": true
+            },
+            "indexByName": {
+              "interface": 0,
+              "in_pct": 1,
+              "out_pct": 2,
+              "in_bps": 3,
+              "out_bps": 4,
+              "speed_bps": 5
+            }
+          }
+        }
+      ]
     },
     {
       "datasource": {
@@ -2184,7 +2218,7 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 12,
+            "w": 24,
             "x": 0,
             "y": 48
           },
@@ -2215,9 +2249,12 @@
               "refId": "A"
             }
           ],
-          "title": "VSYS Sessions",
+          "title": "VSYS Sessions - ${vsys}",
           "type": "timeseries",
-          "description": "Sessions per VSYS summed across dataplanes from show session meter. The limit appears when a VSYS session resource limit is configured.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show session meter` every 1 min\n- `show session info (per VSYS)` every 1 min"
+          "description": "Sessions per VSYS summed across dataplanes from show session meter. The limit appears when a VSYS session resource limit is configured.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show session meter` every 1 min\n- `show session info (per VSYS)` every 1 min",
+          "repeat": "vsys",
+          "repeatDirection": "h",
+          "maxPerRow": 4
         },
         {
           "datasource": {
@@ -2240,9 +2277,9 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 48
+            "w": 24,
+            "x": 0,
+            "y": 56
           },
           "id": 3103,
           "options": {
@@ -2271,9 +2308,12 @@
               "refId": "A"
             }
           ],
-          "title": "VSYS CPS",
+          "title": "VSYS CPS - ${vsys}",
           "type": "timeseries",
-          "description": "New sessions per second and packet rate of this VSYS from show session info scoped to the VSYS (SNMP panVsysTotalCps equivalent). PAN-OS exposes no per-zone CPS through the XML API.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show session meter` every 1 min\n- `show session info (per VSYS)` every 1 min"
+          "description": "New sessions per second and packet rate of this VSYS from show session info scoped to the VSYS (SNMP panVsysTotalCps equivalent). PAN-OS exposes no per-zone CPS through the XML API.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show session meter` every 1 min\n- `show session info (per VSYS)` every 1 min",
+          "repeat": "vsys",
+          "repeatDirection": "h",
+          "maxPerRow": 4
         },
         {
           "datasource": {
@@ -2298,7 +2338,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 56
+            "y": 64
           },
           "id": 3102,
           "options": {
@@ -2327,15 +2367,16 @@
               "refId": "A"
             }
           ],
-          "title": "VSYS Throughput by Zone",
+          "title": "VSYS Throughput by Zone - ${vsys}",
           "type": "timeseries",
-          "description": "Logical interface octet counters of this VSYS summed by zone. In is traffic received from the zone.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
+          "description": "Logical interface octet counters of this VSYS summed by zone. In is traffic received from the zone.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default.",
+          "repeat": "vsys",
+          "repeatDirection": "h",
+          "maxPerRow": 2
         }
       ],
-      "title": "VSYS ${vsys}",
-      "type": "row",
-      "repeat": "vsys",
-      "repeatDirection": "v"
+      "title": "VSYS",
+      "type": "row"
     },
     {
       "collapsed": true,
@@ -2615,12 +2656,12 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 10,
-            "w": 12,
+            "h": 9,
+            "w": 24,
             "x": 0,
             "y": 50
           },
-          "id": 12,
+          "id": 3201,
           "options": {
             "legend": {
               "calcs": [
@@ -2643,13 +2684,16 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r.core != \"average\" and r._field == \"cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Core \" + r.core }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "cores = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r._field == \"cpu_pct\")\naverage = cores\n  |> filter(fn: (r) => r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Average (all cores)\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nactive = cores\n  |> filter(fn: (r) => r.core != \"average\" and r._value > 0.0)\n  |> map(fn: (r) => ({ r with _field: \"Average (active cores)\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nhottest = cores\n  |> filter(fn: (r) => r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Hottest core\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\npeak = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r._field == \"cpu_max_pct\" and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Hottest core (peak)\", _value: float(v: r._value) }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\nunion(tables: [average, active, hottest, peak])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
-          "title": "CPU per Core - ${dataplane}",
+          "title": "CPU Summary - ${dataplane}",
           "type": "timeseries",
-          "description": "One repeated row is created for every dataplane returned by PAN-OS.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
+          "description": "The all-core average matches SNMP. Cores reporting 0% (not used for packet processing) are excluded from the active-core average, which shows the real load of the packet-processing cores. Hottest core is the busiest one-minute average; the peak series is the highest per-core value sampled within each minute.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default.",
+          "repeat": "dataplane",
+          "repeatDirection": "h",
+          "maxPerRow": 4
         },
         {
           "datasource": {
@@ -2659,40 +2703,35 @@
           "fieldConfig": {
             "defaults": {
               "unit": "percent",
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "fillOpacity": 8,
-                "spanNulls": false,
-                "showPoints": "never"
-              },
               "min": 0,
-              "max": 100
+              "max": 100,
+              "decimals": 0,
+              "color": {
+                "mode": "continuous-GrYlRd"
+              },
+              "custom": {
+                "fillOpacity": 85,
+                "lineWidth": 0
+              }
             },
             "overrides": []
           },
           "gridPos": {
             "h": 10,
-            "w": 12,
-            "x": 12,
-            "y": 50
+            "w": 24,
+            "x": 0,
+            "y": 59
           },
-          "id": 13,
+          "id": 3202,
           "options": {
+            "rowHeight": 0.9,
+            "showValue": "never",
+            "colWidth": 0.95,
             "legend": {
-              "calcs": [
-                "lastNotNull",
-                "mean",
-                "max"
-              ],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
+              "showLegend": false
             },
             "tooltip": {
-              "mode": "multi",
-              "sort": "none"
+              "mode": "single"
             }
           },
           "targets": [
@@ -2701,13 +2740,16 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_resources\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r._field == \"utilization_pct\")\n  |> map(fn: (r) => ({ r with _field: r.resource }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "import \"strings\"\nfrom(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r.core != \"average\" and r._field == \"cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Core \" + (if strings.strlen(v: r.core) == 1 then \"00\" else if strings.strlen(v: r.core) == 2 then \"0\" else \"\") + r.core }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
-          "title": "Resource Utilization - ${dataplane}",
-          "type": "timeseries",
-          "description": "Session, packet-buffer, packet-descriptor and software-tag pressure reported by resource-monitor.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
+          "title": "Core Load Map - ${dataplane}",
+          "type": "status-history",
+          "description": "One line per core colored by load, readable even on 64+ core dataplanes.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default.",
+          "repeat": "dataplane",
+          "repeatDirection": "h",
+          "maxPerRow": 2
         },
         {
           "datasource": {
@@ -2751,12 +2793,12 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 12,
-            "w": 12,
+            "h": 10,
+            "w": 24,
             "x": 0,
-            "y": 60
+            "y": 69
           },
-          "id": 3201,
+          "id": 12,
           "options": {
             "legend": {
               "calcs": [
@@ -2779,13 +2821,16 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "cores = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r._field == \"cpu_pct\")\naverage = cores\n  |> filter(fn: (r) => r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Average (all cores)\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nactive = cores\n  |> filter(fn: (r) => r.core != \"average\" and r._value > 0.0)\n  |> map(fn: (r) => ({ r with _field: \"Average (active cores)\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\nhottest = cores\n  |> filter(fn: (r) => r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Hottest core\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\npeak = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r._field == \"cpu_max_pct\" and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _field: \"Hottest core (peak)\", _value: float(v: r._value) }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\nunion(tables: [average, active, hottest, peak])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r.core != \"average\" and r._field == \"cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Core \" + r.core }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
-          "title": "CPU Summary - ${dataplane}",
+          "title": "CPU per Core - ${dataplane}",
           "type": "timeseries",
-          "description": "The all-core average matches SNMP. Cores reporting 0% (not used for packet processing) are excluded from the active-core average, which shows the real load of the packet-processing cores. Hottest core is the busiest one-minute average; the peak series is the highest per-core value sampled within each minute.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
+          "description": "One panel is created for every dataplane returned by PAN-OS.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default.",
+          "repeat": "dataplane",
+          "repeatDirection": "h",
+          "maxPerRow": 2
         },
         {
           "datasource": {
@@ -2795,35 +2840,40 @@
           "fieldConfig": {
             "defaults": {
               "unit": "percent",
-              "min": 0,
-              "max": 100,
-              "decimals": 0,
-              "color": {
-                "mode": "continuous-GrYlRd"
-              },
               "custom": {
-                "fillOpacity": 85,
-                "lineWidth": 0
-              }
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              },
+              "min": 0,
+              "max": 100
             },
             "overrides": []
           },
           "gridPos": {
-            "h": 12,
-            "w": 12,
-            "x": 12,
-            "y": 60
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 79
           },
-          "id": 3202,
+          "id": 13,
           "options": {
-            "rowHeight": 0.9,
-            "showValue": "never",
-            "colWidth": 0.95,
             "legend": {
-              "showLegend": false
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
             },
             "tooltip": {
-              "mode": "single"
+              "mode": "multi",
+              "sort": "none"
             }
           },
           "targets": [
@@ -2832,19 +2882,20 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "import \"strings\"\nfrom(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r.core != \"average\" and r._field == \"cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Core \" + (if strings.strlen(v: r.core) == 1 then \"00\" else if strings.strlen(v: r.core) == 2 then \"0\" else \"\") + r.core }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_resources\" and r.hostname == \"${hostname}\" and r.dataplane == \"${dataplane}\" and r._field == \"utilization_pct\")\n  |> map(fn: (r) => ({ r with _field: r.resource }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
-          "title": "Core Load Map - ${dataplane}",
-          "type": "status-history",
-          "description": "One line per core colored by load, readable even on 64+ core dataplanes.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
+          "title": "Resource Utilization - ${dataplane}",
+          "type": "timeseries",
+          "description": "Session, packet-buffer, packet-descriptor and software-tag pressure reported by resource-monitor.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default.",
+          "repeat": "dataplane",
+          "repeatDirection": "h",
+          "maxPerRow": 4
         }
       ],
-      "title": "Dataplane ${dataplane}",
-      "type": "row",
-      "repeat": "dataplane",
-      "repeatDirection": "v"
+      "title": "Dataplanes",
+      "type": "row"
     },
     {
       "collapsed": true,
