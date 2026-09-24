@@ -125,6 +125,45 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
             names = {item["name"] for item in dashboard["templating"]["list"]}
             self.assertTrue({"interface", "dataplane", "vsys"}.issubset(names))
 
+    def test_load_test_row_summarizes_a_capacity_ramp(self):
+        """The first collapsed section holds the figures of a performance test report."""
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            rows = [panel for panel in dashboard["panels"] if panel["type"] == "row"]
+            titles = [panel["title"] for panel in rows]
+            # First shared section; the chassis dashboard keeps its slot rows first.
+            self.assertEqual(titles.index("Load Test") + 1, titles.index("HA Role Changes"))
+            load_test = rows[titles.index("Load Test")]
+            panels = {panel["title"]: panel for panel in load_test["panels"]}
+            tiles = ["Peak Throughput Received", "Peak Throughput Sent", "Peak Packets/s", "Peak CPS", "Peak Sessions",
+                     "Peak DP Core", "Peak Packet Buffer", "Drops in Range"]
+            for title in tiles:
+                self.assertEqual(panels[title]["type"], "stat", title)
+                self.assertEqual(panels[title]["gridPos"]["w"], 3, title)
+                self.assertIn("v.timeRangeStart", panels[title]["targets"][0]["query"], title)
+            self.assertEqual([panels[t]["options"]["reduceOptions"]["calcs"] for t in tiles[:7]], [["max"]] * 7)
+            self.assertEqual(panels["Drops in Range"]["options"]["reduceOptions"]["calcs"], ["lastNotNull"])
+            self.assertIn('r.severity == "drop"', panels["Drops in Range"]["targets"][0]["query"])
+            self.assertIn("difference(nonNegative: true)", panels["Drops in Range"]["targets"][0]["query"])
+            self.assertIn("r.resource =~ /^packet_buffer/", panels["Peak Packet Buffer"]["targets"][0]["query"])
+            ramp = panels["Throughput vs Dataplane CPU"]
+            self.assertEqual(ramp["fieldConfig"]["defaults"]["unit"], "bps")
+            axis = ramp["fieldConfig"]["overrides"][0]
+            self.assertEqual(axis["matcher"], {"id": "byRegexp", "options": "/CPU|core/"})
+            properties = {item["id"]: item["value"] for item in axis["properties"]}
+            self.assertEqual((properties["unit"], properties["custom.axisPlacement"], properties["max"]), ("percent", "right", 100))
+            for label in ("Received", "Sent", "DP CPU (average)", "Hottest DP core"):
+                self.assertIn(f'_field: "{label}"', ramp["targets"][0]["query"])
+            curve = panels["CPU vs Throughput"]
+            self.assertEqual(curve["type"], "xychart")
+            self.assertEqual(curve["options"]["mapping"], "manual")
+            self.assertEqual([s["x"]["matcher"]["options"] for s in curve["options"]["series"]], ["throughput_bps"] * 2)
+            self.assertEqual([s["y"]["matcher"]["options"] for s in curve["options"]["series"]], ["dp_cpu_pct", "hottest_core_pct"])
+            self.assertIn("aggregateWindow(every: 1m", curve["targets"][0]["query"])
+            self.assertIn('pivot(rowKey: ["_time"], columnKey: ["_field"]', curve["targets"][0]["query"])
+            for title in ("Packet Rate and Connection Rate", "Sessions and Session Table", "Drops and Interface Errors"):
+                self.assertEqual(panels[title]["type"], "timeseries", title)
+            self.assertTrue(load_test["collapsed"])
+
     def test_panel_ids_are_unique_and_rows_are_ordered(self):
         for dashboard in (self.dashboard, self.chassis_dashboard):
             ids = []

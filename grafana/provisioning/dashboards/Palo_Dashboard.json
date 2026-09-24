@@ -454,6 +454,1005 @@
         "x": 0,
         "y": 31
       },
+      "id": 1300,
+      "panels": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bps",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 0,
+            "y": 32
+          },
+          "id": 1301,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.ifName !~ /\\./ and (if exists r.ifType then r.ifType =~ /^(ethernetCsmacd|ethernetCsmacd\\(6\\)|6)$/ else r.ifName =~ /(?i)^(ethernet[0-9]+\\/[0-9]+(\\/[0-9]+)?|port[0-9]+|wan[0-9]*|lan[0-9]*|internal[0-9]*|dmz[0-9]*|x[0-9]+)$/) and (if exists r.ifConnectorPresent then r.ifConnectorPresent =~ /(?i)^(true|true\\(1\\)|1)$/ else true) and r._field =~ /^ifHCInOctets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Received\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak Throughput Received",
+          "type": "stat",
+          "description": "Highest total receive rate of the physical Ethernet ports (IF-MIB ifHCInOctets) during the selected range. For traffic that transits the firewall this is the offered load, the throughput figure of a test report."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bps",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 3,
+            "y": 32
+          },
+          "id": 1302,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.ifName !~ /\\./ and (if exists r.ifType then r.ifType =~ /^(ethernetCsmacd|ethernetCsmacd\\(6\\)|6)$/ else r.ifName =~ /(?i)^(ethernet[0-9]+\\/[0-9]+(\\/[0-9]+)?|port[0-9]+|wan[0-9]*|lan[0-9]*|internal[0-9]*|dmz[0-9]*|x[0-9]+)$/) and (if exists r.ifConnectorPresent then r.ifConnectorPresent =~ /(?i)^(true|true\\(1\\)|1)$/ else true) and r._field =~ /^ifHCOutOctets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Sent\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak Throughput Sent",
+          "type": "stat",
+          "description": "Highest total transmit rate of the physical Ethernet ports (ifHCOutOctets) during the selected range. Lower than the received peak when the firewall drops traffic."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 6,
+            "y": 32
+          },
+          "id": 1303,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.ifName !~ /\\./ and (if exists r.ifType then r.ifType =~ /^(ethernetCsmacd|ethernetCsmacd\\(6\\)|6)$/ else r.ifName =~ /(?i)^(ethernet[0-9]+\\/[0-9]+(\\/[0-9]+)?|port[0-9]+|wan[0-9]*|lan[0-9]*|internal[0-9]*|dmz[0-9]*|x[0-9]+)$/) and (if exists r.ifConnectorPresent then r.ifConnectorPresent =~ /(?i)^(true|true\\(1\\)|1)$/ else true) and r._field =~ /^ifHCIn(Ucast|Multicast|Broadcast)Pkts$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Packets/s received\", _value: r._value }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak Packets/s",
+          "type": "stat",
+          "description": "Highest total packet receive rate of the physical ports (unicast, multicast and broadcast IF-MIB counters) during the selected range."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "cps",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 9,
+            "y": 32
+          },
+          "id": 1304,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"session_cps\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"New sessions/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak CPS",
+          "type": "stat",
+          "description": "Highest new-connection rate (PAN-COMMON-MIB panSessionCps) during the selected range."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 12,
+            "y": 32
+          },
+          "id": 1305,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"sessions_active\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Sessions\", _value: r._value }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak Sessions",
+          "type": "stat",
+          "description": "Highest number of active sessions during the selected range."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "custom": {},
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 15,
+            "y": 32
+          },
+          "id": 1306,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "dp = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"dp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"DP CPU\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_processors\" and r.hostname == \"${hostname}\" and r._field == \"processor_load_pct\" and r.device_index != \"1\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Hottest DP processor\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [dp, hottest])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak DP CPU",
+          "type": "stat",
+          "description": "Highest dataplane CPU during the selected range: HOST-RESOURCES processor 2 (the dataplane of single-dataplane appliances) or the busiest processor other than the management plane (hrDeviceIndex 1), whichever is higher. 100% is the ceiling of the platform: throughput stops growing there."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "custom": {},
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 18,
+            "y": 32
+          },
+          "id": 1307,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_storage\" and r.hostname == \"${hostname}\" and (r._field == \"storage_usage_pct\" or r._field == \"storage_used\" or r._field == \"storage_size\"))\n  |> filter(fn: (r) => r.storage_descr =~ /(?i)packet buffer/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"storage_index\", \"storage_descr\"])\n  |> pivot(rowKey: [\"_time\", \"storage_index\", \"storage_descr\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> filter(fn: (r) => exists r.storage_usage_pct or (exists r.storage_used and exists r.storage_size))\n  |> map(fn: (r) => ({\n    _time: r._time,\n    _field: \"Packet buffer\",\n    _value: if exists r.storage_usage_pct then float(v: r.storage_usage_pct) else if r.storage_size > 0.0 then r.storage_used / r.storage_size * 100.0 else 0.0\n  }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak Packet Buffer",
+          "type": "stat",
+          "description": "Highest packet-buffer pool usage (hrStorage packet buffer entries; panhrStorageUsage on PAN-OS 11.2+, hrStorageUsed / hrStorageSize otherwise) during the selected range. Buffers fill before the dataplane starts dropping packets."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 21,
+            "y": 32
+          },
+          "id": 1308,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "import \"array\"\nincrease = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_global_counters\" and r.hostname == \"${hostname}\" and r._field =~ /^panFlow(PolicyDeny|ScanDrop|IpfragFragErr|MeterVsysThrottle|MeterHostThrottle|TcpNonSyn|FwdL3TtlZero|HostServiceDeny|Dos(DropIpBlocked|PbpDrop|RuleDrop|RuleDropAggr|RuleDropClassified|RuleDeny|AgMaxSessLimit|ClMaxSessLimit|Red(Icmp|Icmp6|Ip|Tcp|Udp)|Pf[A-Za-z0-9]+|[Ii]p6[A-Za-z0-9]+|IPv6ExtHdrHopByHop|CurrSess(Incr|Decr)Failed|ClSyncookieAckErr|SyncookieNotTcpSyn|SyncookieNotTcpSynAck))$/)\n  |> difference(nonNegative: true)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Drops\", _value: float(v: r._value) }))\n  |> group()\nunion(tables: [array.from(rows: [{_time: now(), _field: \"Drops\", _value: 0.0}]), increase])\n  |> group()\n  |> sum()\n  |> map(fn: (r) => ({ _time: now(), _field: \"Drops\", _value: r._value }))",
+              "refId": "A"
+            }
+          ],
+          "title": "Drops in Range",
+          "type": "stat",
+          "description": "Packets dropped by the dataplane during the selected range: sum of the increase of the PAN-COMMON-MIB flow drop counters (policy deny, DoS, zone protection, scan, packet-based attack and fragment errors; polled every 60 s). A clean test run shows 0."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bps",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/CPU|processor/"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 2
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 36
+          },
+          "id": 1311,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "received = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.ifName !~ /\\./ and (if exists r.ifType then r.ifType =~ /^(ethernetCsmacd|ethernetCsmacd\\(6\\)|6)$/ else r.ifName =~ /(?i)^(ethernet[0-9]+\\/[0-9]+(\\/[0-9]+)?|port[0-9]+|wan[0-9]*|lan[0-9]*|internal[0-9]*|dmz[0-9]*|x[0-9]+)$/) and (if exists r.ifConnectorPresent then r.ifConnectorPresent =~ /(?i)^(true|true\\(1\\)|1)$/ else true) and r._field =~ /^ifHCInOctets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Received\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\nsent = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.ifName !~ /\\./ and (if exists r.ifType then r.ifType =~ /^(ethernetCsmacd|ethernetCsmacd\\(6\\)|6)$/ else r.ifName =~ /(?i)^(ethernet[0-9]+\\/[0-9]+(\\/[0-9]+)?|port[0-9]+|wan[0-9]*|lan[0-9]*|internal[0-9]*|dmz[0-9]*|x[0-9]+)$/) and (if exists r.ifConnectorPresent then r.ifConnectorPresent =~ /(?i)^(true|true\\(1\\)|1)$/ else true) and r._field =~ /^ifHCOutOctets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Sent\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\ncpu = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"dp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"DP CPU\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_processors\" and r.hostname == \"${hostname}\" and r._field == \"processor_load_pct\" and r.device_index != \"1\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Hottest DP processor\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [received, sent, cpu, hottest])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Throughput vs Dataplane CPU",
+          "type": "timeseries",
+          "description": "The load ramp: throughput of the physical ports from IF-MIB counters (left axis) against dataplane CPU (right axis): HOST-RESOURCES processor 2 (the dataplane of single-dataplane appliances) and the busiest processor other than the management plane (hrDeviceIndex 1). CPU that climbs faster than throughput, or throughput that flattens while CPU keeps rising, shows where the platform saturates."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "show": "points",
+                "pointSize": {
+                  "fixed": 5
+                },
+                "pointShape": "circle",
+                "pointStrokeWidth": 1,
+                "fillOpacity": 60,
+                "axisPlacement": "auto",
+                "axisLabel": "",
+                "lineWidth": 1,
+                "lineStyle": {
+                  "fill": "solid"
+                },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                }
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "throughput_bps"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Throughput received"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bps"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "dp_cpu_pct"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "DP CPU"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "hottest_cpu_pct"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Hottest DP processor"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 46
+          },
+          "id": 1312,
+          "options": {
+            "mapping": "manual",
+            "series": [
+              {
+                "x": {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "throughput_bps"
+                  }
+                },
+                "y": {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "dp_cpu_pct"
+                  }
+                },
+                "name": {
+                  "fixed": "DP CPU"
+                }
+              },
+              {
+                "x": {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "throughput_bps"
+                  }
+                },
+                "y": {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "hottest_cpu_pct"
+                  }
+                },
+                "name": {
+                  "fixed": "Hottest DP processor"
+                }
+              }
+            ],
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "throughput = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.ifName !~ /\\./ and (if exists r.ifType then r.ifType =~ /^(ethernetCsmacd|ethernetCsmacd\\(6\\)|6)$/ else r.ifName =~ /(?i)^(ethernet[0-9]+\\/[0-9]+(\\/[0-9]+)?|port[0-9]+|wan[0-9]*|lan[0-9]*|internal[0-9]*|dmz[0-9]*|x[0-9]+)$/) and (if exists r.ifConnectorPresent then r.ifConnectorPresent =~ /(?i)^(true|true\\(1\\)|1)$/ else true) and r._field =~ /^ifHCInOctets$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"throughput_bps\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\ncpu = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"dp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"dp_cpu_pct\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_hr_processors\" and r.hostname == \"${hostname}\" and r._field == \"processor_load_pct\" and r.device_index != \"1\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"hottest_cpu_pct\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [throughput, cpu, hottest])\n  |> group()\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> filter(fn: (r) => exists r.throughput_bps and exists r.dp_cpu_pct)\n  |> keep(columns: [\"_time\", \"throughput_bps\", \"dp_cpu_pct\", \"hottest_cpu_pct\"])\n  |> sort(columns: [\"_time\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU vs Throughput",
+          "type": "xychart",
+          "description": "Dataplane CPU as a function of the received throughput, one point per minute of the selected range: the CPU-versus-throughput curve of a performance test report. Points that pile up at 100% CPU mark the maximum throughput of the platform for this traffic mix."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/sessions/"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "cps"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 2
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 46
+          },
+          "id": 1313,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "packets = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.ifName !~ /\\./ and (if exists r.ifType then r.ifType =~ /^(ethernetCsmacd|ethernetCsmacd\\(6\\)|6)$/ else r.ifName =~ /(?i)^(ethernet[0-9]+\\/[0-9]+(\\/[0-9]+)?|port[0-9]+|wan[0-9]*|lan[0-9]*|internal[0-9]*|dmz[0-9]*|x[0-9]+)$/) and (if exists r.ifConnectorPresent then r.ifConnectorPresent =~ /(?i)^(true|true\\(1\\)|1)$/ else true) and r._field =~ /^ifHCIn(Ucast|Multicast|Broadcast)Pkts$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Packets/s received\", _value: r._value }))\n  |> group(columns: [\"_field\"])\ncps = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"session_cps\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"New sessions/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [packets, cps])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Packet Rate and Connection Rate",
+          "type": "timeseries",
+          "description": "Packet receive rate of the physical ports (left axis) and new sessions per second (right axis). Connection rate is the limiting figure for small-transaction traffic mixes."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/table/"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 2
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 56
+          },
+          "id": 1314,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "active = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"sessions_active\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Active\", _value: r._value }))\n  |> group(columns: [\"_field\"])\ntcp = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"sessions_active_tcp\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"TCP\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nudp = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"sessions_active_udp\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"UDP\", _value: r._value }))\n  |> group(columns: [\"_field\"])\ntable = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_system\" and r.hostname == \"${hostname}\" and r._field == \"session_utilization_pct\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Session table used\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [active, tcp, udp, table])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Sessions and Session Table",
+          "type": "timeseries",
+          "description": "Active sessions by protocol (left axis) and session table utilization (right axis)."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 56
+          },
+          "id": 1315,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "drops = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"pan_global_counters\" and r.hostname == \"${hostname}\" and r._field =~ /^panFlow(PolicyDeny|ScanDrop|IpfragFragErr|MeterVsysThrottle|MeterHostThrottle|TcpNonSyn|FwdL3TtlZero|HostServiceDeny|Dos(DropIpBlocked|PbpDrop|RuleDrop|RuleDropAggr|RuleDropClassified|RuleDeny|AgMaxSessLimit|ClMaxSessLimit|Red(Icmp|Icmp6|Ip|Tcp|Udp)|Pf[A-Za-z0-9]+|[Ii]p6[A-Za-z0-9]+|IPv6ExtHdrHopByHop|CurrSess(Incr|Decr)Failed|ClSyncookieAckErr|SyncookieNotTcpSyn|SyncookieNotTcpSynAck))$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Dataplane drops/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nerrors = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"interfaces\" and r.hostname == \"${hostname}\" and exists r.ifName and r.ifName !~ /(?i)^(mgmt|management|aux|hsci|ha($|[0-9-]))/ and r.ifName !~ /\\./ and (if exists r.ifType then r.ifType =~ /^(ethernetCsmacd|ethernetCsmacd\\(6\\)|6)$/ else r.ifName =~ /(?i)^(ethernet[0-9]+\\/[0-9]+(\\/[0-9]+)?|port[0-9]+|wan[0-9]*|lan[0-9]*|internal[0-9]*|dmz[0-9]*|x[0-9]+)$/) and (if exists r.ifConnectorPresent then r.ifConnectorPresent =~ /(?i)^(true|true\\(1\\)|1)$/ else true) and r._field =~ /^if(In|Out)(Errors|Discards)$/)\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Interface errors and discards/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [drops, errors])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Drops and Interface Errors",
+          "type": "timeseries",
+          "description": "Dataplane drop rate (sum of the PAN-COMMON-MIB flow drop counters, polled every 60 s) and IF-MIB errors and discards of the physical ports. Any sustained value during a ramp means the offered load exceeds what the platform forwards cleanly."
+        }
+      ],
+      "title": "Load Test",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
       "id": 9006,
       "panels": [
         {
@@ -548,7 +1547,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 33
       },
       "id": 9001,
       "panels": [
@@ -621,7 +1620,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 34
       },
       "id": 9004,
       "panels": [
@@ -695,7 +1694,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 35
       },
       "id": 9002,
       "panels": [
@@ -928,7 +1927,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 64
       },
       "id": 9003,
       "panels": [
@@ -1110,7 +2109,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 64
+        "y": 65
       },
       "id": 9020,
       "panels": [
@@ -1348,7 +2347,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 66
       },
       "id": 9005,
       "panels": [
@@ -2069,6 +3068,6 @@
   "timezone": "",
   "title": "Palo Alto Firewall Monitoring",
   "uid": "palo-firewall-monitoring",
-  "version": 22,
+  "version": 23,
   "weekStart": ""
 }

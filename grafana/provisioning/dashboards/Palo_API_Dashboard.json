@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Palo Alto performance monitoring through the PAN-OS XML API with SNMP-dashboard parity, current-load tiles, hottest-core and link-utilization views, per-VSYS sessions, per-zone throughput, per-dataplane drill-down and API-only resource metrics.",
+  "description": "Palo Alto performance monitoring through the PAN-OS XML API with SNMP-dashboard parity, current-load tiles, hottest-core and link-utilization views, per-VSYS sessions, per-zone throughput, per-dataplane drill-down, a load-test section for capacity ramps and API-only resource metrics.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -1550,6 +1550,1005 @@
         "x": 0,
         "y": 43
       },
+      "id": 9013,
+      "panels": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bps",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 0,
+            "y": 44
+          },
+          "id": 3601,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"in_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Received\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak Throughput Received",
+          "type": "stat",
+          "description": "Highest total receive rate of the physical Ethernet ports during the selected range. For traffic that transits the firewall this is the offered load, the throughput figure of a test report.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bps",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 3,
+            "y": 44
+          },
+          "id": 3602,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"out_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Sent\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak Throughput Sent",
+          "type": "stat",
+          "description": "Highest total transmit rate of the physical Ethernet ports during the selected range. Lower than the received peak when the firewall drops traffic.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 6,
+            "y": 44
+          },
+          "id": 3603,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"packet_rate_pps\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Packets/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak Packets/s",
+          "type": "stat",
+          "description": "Highest dataplane packet rate reported by show session info during the selected range.\n\nSource: `show session info` via the PAN-OS XML API, polled every 20 s by default."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "cps",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 9,
+            "y": 44
+          },
+          "id": 3604,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"cps\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"CPS\", _value: r._value }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak CPS",
+          "type": "stat",
+          "description": "Highest new-connection rate during the selected range.\n\nSource: `show session info` via the PAN-OS XML API, polled every 20 s by default."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 12,
+            "y": 44
+          },
+          "id": 3605,
+          "options": {
+            "colorMode": "none",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"sessions_active\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Sessions\", _value: r._value }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak Sessions",
+          "type": "stat",
+          "description": "Highest number of active sessions during the selected range.\n\nSource: `show session info` via the PAN-OS XML API, polled every 20 s by default."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "custom": {},
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 15,
+            "y": 44
+          },
+          "id": 3606,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field =~ /^cpu_(max_)?pct$/ and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Hottest core\", _value: r._value }))\n  |> group(columns: [\"_field\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak DP Core",
+          "type": "stat",
+          "description": "Busiest dataplane core during the selected range (one-minute peak when PAN-OS provides it). 100% on the packet-processing cores is the ceiling of the platform: throughput stops growing there.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "custom": {},
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 18,
+            "y": 44
+          },
+          "id": 3607,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "max"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_resources\" and r.hostname == \"${hostname}\" and r._field == \"utilization_pct\" and r.resource =~ /^packet_buffer/)\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Packet buffer\", _value: r._value }))",
+              "refId": "A"
+            }
+          ],
+          "title": "Peak Packet Buffer",
+          "type": "stat",
+          "description": "Highest packet-buffer utilization of any dataplane during the selected range. Buffers fill before the dataplane starts dropping packets.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 21,
+            "y": 44
+          },
+          "id": 3608,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_counters\" and r.hostname == \"${hostname}\" and r._field == \"value\" and r.severity == \"drop\")\n  |> difference(nonNegative: true)\n  |> group()\n  |> sum()\n  |> map(fn: (r) => ({ _time: now(), _field: \"Drops\", _value: r._value }))",
+              "refId": "A"
+            }
+          ],
+          "title": "Drops in Range",
+          "type": "stat",
+          "description": "Packets dropped by the dataplane during the selected range: sum of the increase of every severity=drop global counter. A clean test run shows 0.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter global filter severity drop` every 1 min\n- `show counter global filter aspect dos` every 1 min"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bps",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/CPU|core/"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 2
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 48
+          },
+          "id": 3611,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "received = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"in_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Received\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\nsent = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"out_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Sent\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\ncpu = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"DP CPU (average)\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field =~ /^cpu_(max_)?pct$/ and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Hottest DP core\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [received, sent, cpu, hottest])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Throughput vs Dataplane CPU",
+          "type": "timeseries",
+          "description": "The load ramp: throughput of the physical ports (left axis) against dataplane CPU (right axis). CPU that climbs faster than throughput, or throughput that flattens while CPU keeps rising, shows where the platform saturates. The dataplane CPU is the one-minute resource-monitor average, so it lags the 20-second throughput by up to a minute.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter interface all` every 20 s\n- `show running resource-monitor minute last 1` every 1 min"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "show": "points",
+                "pointSize": {
+                  "fixed": 5
+                },
+                "pointShape": "circle",
+                "pointStrokeWidth": 1,
+                "fillOpacity": 60,
+                "axisPlacement": "auto",
+                "axisLabel": "",
+                "lineWidth": 1,
+                "lineStyle": {
+                  "fill": "solid"
+                },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                }
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "throughput_bps"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Throughput received"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "bps"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "dp_cpu_pct"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "DP CPU (average)"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "hottest_core_pct"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Hottest DP core"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 58
+          },
+          "id": 3612,
+          "options": {
+            "mapping": "manual",
+            "series": [
+              {
+                "x": {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "throughput_bps"
+                  }
+                },
+                "y": {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "dp_cpu_pct"
+                  }
+                },
+                "name": {
+                  "fixed": "DP CPU (average)"
+                }
+              },
+              {
+                "x": {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "throughput_bps"
+                  }
+                },
+                "y": {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "hottest_core_pct"
+                  }
+                },
+                "name": {
+                  "fixed": "Hottest DP core"
+                }
+              }
+            ],
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "throughput = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"in_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"throughput_bps\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\ncpu = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"dp_cpu_pct\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field =~ /^cpu_(max_)?pct$/ and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"hottest_core_pct\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [throughput, cpu, hottest])\n  |> group()\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> filter(fn: (r) => exists r.throughput_bps and exists r.dp_cpu_pct)\n  |> keep(columns: [\"_time\", \"throughput_bps\", \"dp_cpu_pct\", \"hottest_core_pct\"])\n  |> sort(columns: [\"_time\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU vs Throughput",
+          "type": "xychart",
+          "description": "Dataplane CPU as a function of the received throughput, one point per minute of the selected range: the CPU-versus-throughput curve of a performance test report. Points that pile up at 100% CPU mark the maximum throughput of the platform for this traffic mix.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter interface all` every 20 s\n- `show running resource-monitor minute last 1` every 1 min"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/sessions/"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "cps"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 2
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 58
+          },
+          "id": 3613,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "packets = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"packet_rate_pps\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Packets/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])\ncps = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"cps\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"New sessions/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [packets, cps])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Packet Rate and Connection Rate",
+          "type": "timeseries",
+          "description": "Dataplane packet rate (left axis) and new connections per second (right axis) from show session info. Connection rate is the limiting figure for small-transaction traffic mixes.\n\nSource: `show session info` via the PAN-OS XML API, polled every 20 s by default."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/table/"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 2
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 68
+          },
+          "id": 3614,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "active = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"sessions_active\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Active\", _value: r._value }))\n  |> group(columns: [\"_field\"])\ntcp = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"sessions_tcp\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"TCP\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nudp = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"sessions_udp\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"UDP\", _value: r._value }))\n  |> group(columns: [\"_field\"])\ntable = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_sessions\" and r.hostname == \"${hostname}\" and r._field == \"session_utilization_pct\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Session table used\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [active, tcp, udp, table])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Sessions and Session Table",
+          "type": "timeseries",
+          "description": "Active sessions by protocol (left axis) and session table utilization (right axis).\n\nSource: `show session info` via the PAN-OS XML API, polled every 20 s by default."
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 68
+          },
+          "id": 3615,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "influxdb",
+                "uid": "P951FEA4DE68E13C5"
+              },
+              "query": "drops = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_counters\" and r.hostname == \"${hostname}\" and r._field == \"value\" and r.severity == \"drop\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Dataplane drops/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nin_errors = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"in_errors\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Ingress errors/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nin_discards = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"in_discards\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Ingress discards/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nout_errors = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"out_errors\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Egress errors/s\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [drops, in_errors, in_discards, out_errors])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "refId": "A"
+            }
+          ],
+          "title": "Drops and Interface Errors",
+          "type": "timeseries",
+          "description": "Total dataplane drop rate (severity=drop global counters) and hardware errors and discards of the physical ports. Any sustained value during a ramp means the offered load exceeds what the platform forwards cleanly.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter global filter severity drop` every 1 min\n- `show counter global filter aspect dos` every 1 min\n- `show counter interface all` every 20 s"
+        }
+      ],
+      "title": "Load Test",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
       "id": 9006,
       "panels": [
         {
@@ -1615,7 +2614,7 @@
             "h": 6,
             "w": 24,
             "x": 0,
-            "y": 44
+            "y": 45
           },
           "id": 1006,
           "options": {
@@ -1746,7 +2745,7 @@
             "h": 4,
             "w": 24,
             "x": 0,
-            "y": 50
+            "y": 51
           },
           "id": 1007,
           "options": {
@@ -1899,7 +2898,7 @@
             "h": 4,
             "w": 24,
             "x": 0,
-            "y": 54
+            "y": 55
           },
           "id": 1008,
           "options": {
@@ -1933,7 +2932,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 45
       },
       "id": 9001,
       "panels": [
@@ -1960,7 +2959,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 45
+            "y": 46
           },
           "id": 8,
           "options": {
@@ -2006,7 +3005,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 46
       },
       "id": 9008,
       "panels": [
@@ -2033,7 +3032,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 46
+            "y": 47
           },
           "id": 9,
           "options": {
@@ -2086,7 +3085,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 46
+            "y": 47
           },
           "id": 10,
           "options": {
@@ -2120,7 +3119,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 47
       },
       "id": 9004,
       "panels": [
@@ -2147,7 +3146,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 47
+            "y": 48
           },
           "id": 11,
           "options": {
@@ -2193,7 +3192,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 47
+        "y": 48
       },
       "id": 9009,
       "panels": [
@@ -2220,7 +3219,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 48
+            "y": 49
           },
           "id": 3101,
           "options": {
@@ -2279,7 +3278,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 56
+            "y": 57
           },
           "id": 3103,
           "options": {
@@ -2338,7 +3337,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 64
+            "y": 65
           },
           "id": 3102,
           "options": {
@@ -2384,7 +3383,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 49
       },
       "id": 9010,
       "panels": [
@@ -2411,7 +3410,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 49
+            "y": 50
           },
           "id": 3111,
           "options": {
@@ -2467,7 +3466,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 49
+            "y": 50
           },
           "id": 3114,
           "options": {
@@ -2523,7 +3522,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 59
+            "y": 60
           },
           "id": 3113,
           "options": {
@@ -2576,7 +3575,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 69
+            "y": 70
           },
           "id": 3115,
           "options": {
@@ -2610,7 +3609,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 50
       },
       "id": 9002,
       "panels": [
@@ -2659,7 +3658,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 50
+            "y": 51
           },
           "id": 3201,
           "options": {
@@ -2720,7 +3719,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 59
+            "y": 60
           },
           "id": 3202,
           "options": {
@@ -2796,7 +3795,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 69
+            "y": 70
           },
           "id": 12,
           "options": {
@@ -2857,7 +3856,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 79
+            "y": 80
           },
           "id": 13,
           "options": {
@@ -2903,7 +3902,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 51
       },
       "id": 9007,
       "panels": [
@@ -2930,7 +3929,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 51
+            "y": 52
           },
           "id": 14,
           "options": {
@@ -2986,7 +3985,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 51
+            "y": 52
           },
           "id": 15,
           "options": {
@@ -3029,7 +4028,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 52
       },
       "id": 9003,
       "panels": [
@@ -3056,7 +4055,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 52
+            "y": 53
           },
           "id": 3301,
           "options": {
@@ -3112,7 +4111,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 52
+            "y": 53
           },
           "id": 3302,
           "options": {
@@ -3168,7 +4167,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 61
+            "y": 62
           },
           "id": 3303,
           "options": {
@@ -3224,7 +4223,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 61
+            "y": 62
           },
           "id": 3304,
           "options": {
@@ -3280,7 +4279,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 70
+            "y": 71
           },
           "id": 3305,
           "options": {
@@ -3323,7 +4322,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 52
+        "y": 53
       },
       "id": 9011,
       "panels": [
@@ -3350,7 +4349,7 @@
             "h": 12,
             "w": 24,
             "x": 0,
-            "y": 53
+            "y": 54
           },
           "id": 16,
           "options": {
@@ -3403,7 +4402,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 65
+            "y": 66
           },
           "id": 3311,
           "options": {
@@ -3437,7 +4436,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 53
+        "y": 54
       },
       "id": 9012,
       "panels": [
@@ -3465,7 +4464,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 54
+            "y": 55
           },
           "id": 3501,
           "options": {
@@ -3522,7 +4521,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 54
+            "y": 55
           },
           "id": 3502,
           "options": {
@@ -3672,7 +4671,7 @@
             "h": 4,
             "w": 24,
             "x": 0,
-            "y": 63
+            "y": 64
           },
           "id": 3503,
           "options": {
@@ -3728,7 +4727,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 67
+            "y": 68
           },
           "id": 3504,
           "options": {
@@ -3818,7 +4817,7 @@
             "h": 8,
             "w": 10,
             "x": 4,
-            "y": 67
+            "y": 68
           },
           "id": 3505,
           "options": {
@@ -3925,7 +4924,7 @@
             "h": 8,
             "w": 10,
             "x": 14,
-            "y": 67
+            "y": 68
           },
           "id": 3508,
           "options": {
@@ -3977,7 +4976,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 71
+            "y": 72
           },
           "id": 3506,
           "options": {
@@ -4032,7 +5031,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 75
+            "y": 76
           },
           "id": 3507,
           "options": {
@@ -4075,7 +5074,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 55
       },
       "id": 9005,
       "panels": [
@@ -4102,7 +5101,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 55
+            "y": 56
           },
           "id": 17,
           "options": {
@@ -4158,7 +5157,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 55
+            "y": 56
           },
           "id": 18,
           "options": {
@@ -4216,7 +5215,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 65
+            "y": 66
           },
           "id": 19,
           "options": {
@@ -4376,7 +5375,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 65
+            "y": 66
           },
           "id": 3401,
           "options": {
@@ -4425,7 +5424,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 75
+            "y": 76
           },
           "id": 22,
           "options": {
@@ -4481,7 +5480,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 75
+            "y": 76
           },
           "id": 23,
           "options": {
@@ -4524,7 +5523,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 56
       },
       "id": 9100,
       "panels": [
@@ -4551,7 +5550,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 56
+            "y": 57
           },
           "id": 20,
           "options": {
@@ -4607,7 +5606,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 56
+            "y": 57
           },
           "id": 21,
           "options": {
@@ -4663,7 +5662,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 66
+            "y": 67
           },
           "id": 24,
           "options": {
@@ -4716,7 +5715,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 66
+            "y": 67
           },
           "id": 25,
           "options": {
@@ -4965,6 +5964,6 @@
   "timezone": "browser",
   "title": "Palo Alto API Performance Monitoring",
   "uid": "paloalto-api-performance",
-  "version": 5,
+  "version": 6,
   "weekStart": ""
 }
