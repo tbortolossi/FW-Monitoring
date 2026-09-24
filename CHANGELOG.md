@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.3 - 2026-09-24
+
+### Fixed
+
+- The **CPU vs Throughput** scatter plot of the Load Test section showed **No data** in the five dashboards: its manual series mapping matched fields by the raw Flux column names while the panel overrides rename them, and Grafana matches by display name. The series matchers now use the display names; Grafana reloads the provisioned files.
+
 ## 1.4.2 - 2026-09-24
 
 ### Added
