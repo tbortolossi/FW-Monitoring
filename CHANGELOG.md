@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.5 - 2026-09-24
+
+### Fixed
+
+- Palo Alto API dashboards under-reported throughput when traffic is hardware-offloaded: a load test with half its traffic offloaded read 47 Gb/s on the API dashboard against 97 Gb/s on the wire. The collector used the `ibytes` / `obytes` counters of `show counter interface all`, which the dataplane maintains and which miss offloaded flows. It now reads the MAC-level port counters (`port/rx-bytes` / `port/tx-bytes`, and unicast + multicast + broadcast frames for packets/s) of the same response, the counter SNMP `ifHCInOctets` returns, and falls back to the old counters only when the port block is absent. Field names are unchanged. Rebuild the Telegraf image (`./generate.sh`) to apply; rate panels show a single spike at the first poll after the upgrade, when the cumulative counters switch source. Per-zone, per-VSYS and logical-interface throughput still come from the dataplane `ifnet` counters and can under-report offloaded flows.
+
 ## 1.4.4 - 2026-09-24
 
 ### Fixed
