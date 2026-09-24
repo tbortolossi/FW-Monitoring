@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.2 - 2026-09-24
+
+### Added
+
+- A collapsed **Load Test** section right under the overview of the five dashboards (Palo Alto SNMP, Palo Alto Chassis SNMP, Fortinet SNMP, Palo Alto API, Palo Alto API Chassis) for capacity ramps driven by a traffic generator: eight peak tiles reduced over the selected time range (throughput received and sent, packets/s, CPS, sessions, dataplane CPU, packet buffer or busiest processor, packets dropped during the range), a **Throughput vs CPU** ramp with the dataplane CPU on a right axis, a **CPU vs Throughput** scatter plot (one point per minute, the curve of vendor test reports), packet and connection rates, sessions with session-table utilization (NPU offload on Fortinet), and dataplane drops with interface errors. No collector or SNMP template change; Grafana reloads the provisioned files. Usage is described in the README section "Follow a Load Test".
+
 ## 1.4.1 - 2026-09-23
 
 ### Fixed
