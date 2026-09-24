@@ -131,6 +131,43 @@ class DashboardProvisioningTests(unittest.TestCase):
                     with self.subTest(dashboard=name, group=group, first=first.get("id"), second=second.get("id")):
                         self.assertFalse(overlaps(first, second))
 
+    def test_every_dashboard_has_a_load_test_section(self):
+        """Each dashboard carries the same collapsed load-test section: eight peak
+        tiles reduced over the selected time range, a throughput-versus-CPU ramp
+        with the CPU on a right axis, a CPU-versus-throughput scatter plot and
+        three supporting time series."""
+        for name, dashboard in self.dashboards.items():
+            with self.subTest(dashboard=name):
+                rows = [panel for panel in dashboard["panels"] if panel["type"] == "row"]
+                row = next(panel for panel in rows if panel["title"] == "Load Test")
+                self.assertTrue(row["collapsed"])
+                ha = next(panel for panel in rows if panel["title"] == "HA Role Changes")
+                self.assertLess(row["gridPos"]["y"], ha["gridPos"]["y"])
+                panels = row["panels"]
+                tiles = [panel for panel in panels if panel["type"] == "stat"]
+                self.assertEqual(len(tiles), 8)
+                self.assertEqual(sorted(panel["gridPos"]["x"] for panel in tiles), list(range(0, 24, 3)))
+                for tile in tiles:
+                    self.assertIn("v.timeRangeStart", tile["targets"][0]["query"], tile["title"])
+                    calc = "lastNotNull" if tile["title"] == "Drops in Range" else "max"
+                    self.assertEqual(tile["options"]["reduceOptions"]["calcs"], [calc], tile["title"])
+                self.assertTrue(tiles[0]["title"].startswith("Peak Throughput"))
+                self.assertEqual(tiles[-1]["title"], "Drops in Range")
+                self.assertIn("difference(nonNegative: true)", tiles[-1]["targets"][0]["query"])
+                ramp = next(panel for panel in panels if panel["title"].startswith("Throughput vs"))
+                self.assertEqual(ramp["gridPos"]["w"], 24)
+                self.assertEqual(ramp["fieldConfig"]["defaults"]["unit"], "bps")
+                self.assertTrue(any(
+                    item["matcher"]["id"] == "byRegexp"
+                    and {"id": "custom.axisPlacement", "value": "right"} in item["properties"]
+                    for item in ramp["fieldConfig"]["overrides"]
+                ))
+                scatter = next(panel for panel in panels if panel["type"] == "xychart")
+                self.assertEqual(scatter["title"], "CPU vs Throughput")
+                self.assertEqual(scatter["options"]["mapping"], "manual")
+                self.assertTrue(all(series["x"]["matcher"]["options"] == "throughput_bps" for series in scatter["options"]["series"]))
+                self.assertEqual(len([panel for panel in panels if panel["type"] == "timeseries"]), 4)
+
     def test_dashboard_provider_points_at_provisioning_directory(self):
         config = yaml.safe_load((DASHBOARD_DIR / "dashboards.yaml").read_text(encoding="utf-8"))
         paths = [provider["options"]["path"] for provider in config["providers"]]

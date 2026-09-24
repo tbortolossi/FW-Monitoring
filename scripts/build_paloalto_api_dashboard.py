@@ -172,6 +172,82 @@ def override(name: str, **properties) -> dict:
     }
 
 
+def regex_override(pattern: str, **properties) -> dict:
+    item = override(pattern, **properties)
+    item["matcher"]["id"] = "byRegexp"
+    return item
+
+
+def right_axis(panel: dict, pattern: str, unit: str, *, percent: bool = False) -> dict:
+    """Plot the series matching ``pattern`` on a second Y axis on the right."""
+    properties = {"unit": unit, "custom__axisPlacement": "right", "custom__lineWidth": 2, "custom__fillOpacity": 0}
+    if percent:
+        properties.update(min=0, max=100)
+    panel["fieldConfig"]["overrides"].append(regex_override(pattern, **properties))
+    return panel
+
+
+def peak(panel_id: int, title: str, query: str, x: int, y: int, unit: str, *, levels: dict | None = None,
+         description: str = "", calc: str = "max", w: int = 3) -> dict:
+    """Tile reduced over the selected time range (peak by default).
+
+    A load test is read against the time range of the test: the tile shows
+    the maximum reached during the range, the figure a test report quotes.
+    """
+    panel = stat(panel_id, title, query, x, y, w, unit, 1 if unit == "percent" else None)
+    panel["options"]["reduceOptions"]["calcs"] = [calc]
+    panel["fieldConfig"]["defaults"]["thresholds"] = levels or thresholds(("text", None))
+    panel["fieldConfig"]["defaults"]["color"] = {"mode": "thresholds"}
+    panel["options"]["colorMode"] = "background" if levels else "none"
+    panel["description"] = description
+    return panel
+
+
+def xychart(panel_id: int, title: str, query: str, x: int, y: int, w: int, h: int, x_field: str,
+            series: list[tuple[str, str]], description: str = "") -> dict:
+    """Scatter plot of ``series`` (field, label) against ``x_field``."""
+    return {
+        "datasource": DATASOURCE,
+        "fieldConfig": {
+            "defaults": {
+                "custom": {
+                    "show": "points",
+                    "pointSize": {"fixed": 5},
+                    "pointShape": "circle",
+                    "pointStrokeWidth": 1,
+                    "fillOpacity": 60,
+                    "axisPlacement": "auto",
+                    "axisLabel": "",
+                    "lineWidth": 1,
+                    "lineStyle": {"fill": "solid"},
+                    "hideFrom": {"legend": False, "tooltip": False, "viz": False},
+                },
+                "color": {"mode": "palette-classic"},
+            },
+            "overrides": [],
+        },
+        "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "id": panel_id,
+        "options": {
+            "mapping": "manual",
+            "series": [
+                {
+                    "x": {"matcher": {"id": "byName", "options": x_field}},
+                    "y": {"matcher": {"id": "byName", "options": field}},
+                    "name": {"fixed": label},
+                }
+                for field, label in series
+            ],
+            "legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": True},
+            "tooltip": {"mode": "single", "sort": "none"},
+        },
+        "targets": [target(query)],
+        "title": title,
+        "type": "xychart",
+        "description": description,
+    }
+
+
 def state_timeline(panel_id: int, title: str, query: str, y: int) -> dict:
     return {
         "datasource": DATASOURCE,
@@ -499,6 +575,163 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
 ''', 16, 35, 8, 8, "pps", "Packets dropped per second by the dataplane, stacked by PAN-OS counter category so the total drop rate is the top of the stack. Details are in the drop counter sections.")),
     ]
+
+
+# Load-test section: the figures a performance test report is built from
+# (throughput, connection rate, packet rate, sessions, dataplane CPU, buffer
+# pressure and drops) on one screen, so a ramp driven by a traffic generator can
+# be followed live and summarized over the time range of the test.
+
+def physical_rate(field: str, label: str, window: str = "v.windowPeriod") -> str:
+    """Sum of a hardware counter rate over every physical Ethernet port."""
+    return f'''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${{hostname}}" and {PHYSICAL} and r._field == "{field}")
+  |> derivative(unit: 1s, nonNegative: true)
+  |> aggregateWindow(every: {window}, fn: mean, createEmpty: false)
+  |> group(columns: ["_time"])
+  |> sum()
+  |> group()
+  |> map(fn: (r) => ({{ _time: r._time, _field: "{label}", _value: r._value{" * 8.0" if field.endswith("_octets") else ""} }}))
+  |> group(columns: ["_field"])
+'''
+
+
+def dataplane_cpu(label: str, window: str = "v.windowPeriod", *, hottest: bool = False) -> str:
+    """Average of the dataplane all-core averages, or the hottest core of any dataplane."""
+    if hottest:
+        selector = 'r._field =~ /^cpu_(max_)?pct$/ and r.core != "average"'
+        fn = "max"
+    else:
+        selector = 'r._field == "cpu_pct" and r.core == "average"'
+        fn = "mean"
+    return f'''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${{hostname}}" and {selector})
+  |> map(fn: (r) => ({{ r with _value: float(v: r._value) }}))
+  |> group()
+  |> aggregateWindow(every: {window}, fn: {fn}, createEmpty: false)
+  |> map(fn: (r) => ({{ _time: r._time, _field: "{label}", _value: r._value }}))
+  |> group(columns: ["_field"])
+'''
+
+
+def session_series(field: str, label: str, fn: str = "mean") -> str:
+    return f'''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_sessions" and r.hostname == "${{hostname}}" and r._field == "{field}")
+  |> map(fn: (r) => ({{ r with _value: float(v: r._value) }}))
+  |> group()
+  |> aggregateWindow(every: v.windowPeriod, fn: {fn}, createEmpty: false)
+  |> map(fn: (r) => ({{ _time: r._time, _field: "{label}", _value: r._value }}))
+  |> group(columns: ["_field"])
+'''
+
+
+def named(query: str, name: str) -> str:
+    """Bind a query to a Flux variable so several can be combined with union."""
+    return f"{name} = " + query.strip() + "\n"
+
+
+def load_test_row() -> dict:
+    received = physical_rate("in_octets", "Received")
+    sent = physical_rate("out_octets", "Sent")
+    packets = physical_rate("in_packets", "Packets/s received")
+    drops_in_range = '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_counters" and r.hostname == "${hostname}" and r._field == "value" and r.severity == "drop")
+  |> difference(nonNegative: true)
+  |> group()
+  |> sum()
+  |> map(fn: (r) => ({ _time: now(), _field: "Drops", _value: r._value }))
+'''
+    tiles = [
+        peak(3601, "Peak Throughput Received", received, 0, 0, "bps",
+             description="Highest total receive rate of the physical Ethernet ports during the selected range. For traffic that transits the firewall this is the offered load, the throughput figure of a test report."),
+        peak(3602, "Peak Throughput Sent", sent, 3, 0, "bps",
+             description="Highest total transmit rate of the physical Ethernet ports during the selected range. Lower than the received peak when the firewall drops traffic."),
+        peak(3603, "Peak Packets/s", session_series("packet_rate_pps", "Packets/s"), 6, 0, "pps",
+             description="Highest dataplane packet rate reported by show session info during the selected range."),
+        peak(3604, "Peak CPS", session_series("cps", "CPS"), 9, 0, "cps",
+             description="Highest new-connection rate during the selected range."),
+        peak(3605, "Peak Sessions", session_series("sessions_active", "Sessions", "max"), 12, 0, "short",
+             description="Highest number of active sessions during the selected range."),
+        peak(3606, "Peak DP Core", dataplane_cpu("Hottest core", hottest=True), 15, 0, "percent", levels=LOAD_THRESHOLDS,
+             description="Busiest dataplane core during the selected range (one-minute peak when PAN-OS provides it). 100% on the packet-processing cores is the ceiling of the platform: throughput stops growing there."),
+        peak(3607, "Peak Packet Buffer", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_resources" and r.hostname == "${hostname}" and r._field == "utilization_pct" and r.resource =~ /^packet_buffer/)
+  |> group()
+  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
+  |> map(fn: (r) => ({ _time: r._time, _field: "Packet buffer", _value: r._value }))
+''', 18, 0, "percent", levels=LOAD_THRESHOLDS,
+             description="Highest packet-buffer utilization of any dataplane during the selected range. Buffers fill before the dataplane starts dropping packets."),
+        peak(3608, "Drops in Range", drops_in_range, 21, 0, "short", levels=thresholds(("green", None), ("red", 1)), calc="lastNotNull",
+             description="Packets dropped by the dataplane during the selected range: sum of the increase of every severity=drop global counter. A clean test run shows 0."),
+    ]
+    ramp = timeseries(3611, "Throughput vs Dataplane CPU", (
+        named(received, "received") + named(sent, "sent")
+        + named(dataplane_cpu("DP CPU (average)"), "cpu") + named(dataplane_cpu("Hottest DP core", hottest=True), "hottest")
+        + '''union(tables: [received, sent, cpu, hottest])
+  |> keep(columns: ["_time", "_field", "_value"])'''
+    ), 0, 4, 24, 10, "bps", (
+        "The load ramp: throughput of the physical ports (left axis) against dataplane CPU (right axis). "
+        "CPU that climbs faster than throughput, or throughput that flattens while CPU keeps rising, shows where the platform saturates. "
+        "The dataplane CPU is the one-minute resource-monitor average, so it lags the 20-second throughput by up to a minute."
+    ))
+    right_axis(ramp, "/CPU|core/", "percent", percent=True)
+    curve = xychart(3612, "CPU vs Throughput", (
+        named(physical_rate("in_octets", "throughput_bps", "1m"), "throughput")
+        + named(dataplane_cpu("dp_cpu_pct", "1m"), "cpu") + named(dataplane_cpu("hottest_core_pct", "1m", hottest=True), "hottest")
+        + '''union(tables: [throughput, cpu, hottest])
+  |> group()
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> filter(fn: (r) => exists r.throughput_bps and exists r.dp_cpu_pct)
+  |> keep(columns: ["_time", "throughput_bps", "dp_cpu_pct", "hottest_core_pct"])
+  |> sort(columns: ["_time"])'''
+    ), 0, 14, 12, 10, "throughput_bps", [("dp_cpu_pct", "DP CPU (average)"), ("hottest_core_pct", "Hottest DP core")],
+        "Dataplane CPU as a function of the received throughput, one point per minute of the selected range: the CPU-versus-throughput curve of a performance test report. Points that pile up at 100% CPU mark the maximum throughput of the platform for this traffic mix.")
+    curve["fieldConfig"]["overrides"] = [
+        override("throughput_bps", displayName="Throughput received", unit="bps"),
+        override("dp_cpu_pct", displayName="DP CPU (average)", unit="percent", min=0, max=100),
+        override("hottest_core_pct", displayName="Hottest DP core", unit="percent", min=0, max=100),
+    ]
+    rates = timeseries(3613, "Packet Rate and Connection Rate", (
+        named(session_series("packet_rate_pps", "Packets/s"), "packets") + named(session_series("cps", "New sessions/s"), "cps")
+        + '''union(tables: [packets, cps])
+  |> keep(columns: ["_time", "_field", "_value"])'''
+    ), 12, 14, 12, 10, "pps", "Dataplane packet rate (left axis) and new connections per second (right axis) from show session info. Connection rate is the limiting figure for small-transaction traffic mixes.")
+    right_axis(rates, "/sessions/", "cps")
+    sessions = timeseries(3614, "Sessions and Session Table", (
+        named(session_series("sessions_active", "Active"), "active") + named(session_series("sessions_tcp", "TCP"), "tcp")
+        + named(session_series("sessions_udp", "UDP"), "udp") + named(session_series("session_utilization_pct", "Session table used"), "table")
+        + '''union(tables: [active, tcp, udp, table])
+  |> keep(columns: ["_time", "_field", "_value"])'''
+    ), 0, 24, 12, 9, "short", "Active sessions by protocol (left axis) and session table utilization (right axis).")
+    right_axis(sessions, "/table/", "percent", percent=True)
+    drops = timeseries(3615, "Drops and Interface Errors", (
+        '''drops = from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_counters" and r.hostname == "${hostname}" and r._field == "value" and r.severity == "drop")
+  |> derivative(unit: 1s, nonNegative: true)
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> group(columns: ["_time"])
+  |> sum()
+  |> group()
+  |> map(fn: (r) => ({ _time: r._time, _field: "Dataplane drops/s", _value: r._value }))
+  |> group(columns: ["_field"])
+'''
+        + named(physical_rate("in_errors", "Ingress errors/s"), "in_errors") + named(physical_rate("in_discards", "Ingress discards/s"), "in_discards")
+        + named(physical_rate("out_errors", "Egress errors/s"), "out_errors")
+        + '''union(tables: [drops, in_errors, in_discards, out_errors])
+  |> keep(columns: ["_time", "_field", "_value"])'''
+    ), 12, 24, 12, 9, "pps", "Total dataplane drop rate (severity=drop global counters) and hardware errors and discards of the physical ports. Any sustained value during a ramp means the offered load exceeds what the platform forwards cleanly.")
+    return row(9013, "Load Test", 0, [*tiles, ramp, curve, rates, sessions, drops])
 
 
 HA_LINK_FIELDS = "/^(ha1_status|ha2_status|link_monitoring|path_monitoring|state_reason|state_duration|local_priority|peer_priority|preemptive)$/"
@@ -1339,6 +1572,7 @@ def shared_body(*, sensors: bool, raid: bool) -> list[dict]:
     and in the Chassis Slot Inventory row on the chassis dashboard.
     """
     return [
+        load_test_row(),
         ha_row(),
         *interface_rows(),
         *zone_rows(),
@@ -1470,10 +1704,10 @@ schema.tagValues(bucket: "firewalls", tag: "hostname", predicate: (r) => r._meas
         description=(
             "Palo Alto performance monitoring through the PAN-OS XML API with SNMP-dashboard parity, "
             "current-load tiles, hottest-core and link-utilization views, per-VSYS sessions, per-zone throughput, "
-            "per-dataplane drill-down and API-only resource metrics."
+            "per-dataplane drill-down, a load-test section for capacity ramps and API-only resource metrics."
         ),
         tags=["paloalto", "xml-api", "firewall", "performance"],
-        version=5,
+        version=6,
         panels=add_sources(add_imports(stack_rows(panels))),
         hostname_query=hostname_query,
     )
@@ -1515,7 +1749,7 @@ from(bucket: "firewalls")
             "plus chassis slot inventory, live slot state and power when supported."
         ),
         tags=["paloalto", "xml-api", "chassis", "performance"],
-        version=3,
+        version=4,
         panels=add_sources(add_imports(stack_rows(panels))),
         hostname_query=hostname_query,
     )

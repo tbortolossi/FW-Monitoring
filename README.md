@@ -21,6 +21,7 @@ The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB 
   - `Fortinet Firewall Monitoring`
   - `Palo Alto API Performance Monitoring`
   - `Palo Alto API Chassis Monitoring`
+- A **Load Test** section in every dashboard for following a capacity ramp live and reading the peak figures of a test run (see [Follow a Load Test](#follow-a-load-test))
 - Best-effort SNMP discovery of model, software version, and features before the Telegraf configuration is generated
 
 ## Common Tasks
@@ -238,6 +239,19 @@ docker compose ps
 docker compose logs --tail=100 telegraf
 tail -100 logs/telegraf/telegraf.log
 ```
+
+### Follow a Load Test
+
+Every dashboard has a collapsed **Load Test** section, placed right under the overview, for a proof-of-concept or capacity test driven by a traffic generator. It shows on one screen the figures a performance test report is built from, so a customer can watch the ramp live and the engineer can read the results without leaving Grafana:
+
+- **Peak tiles** reduced over the selected time range: throughput received and sent, packets per second, connections per second, sessions, dataplane CPU (hottest core on the API dashboards, busiest processor on SNMP), packet-buffer usage (Palo Alto) or busiest processor (Fortinet), and the number of packets dropped during the range. Set the time range to the test window and the tiles show the maxima reached, for example "26.6 Gbps at 100% dataplane CPU".
+- **Throughput vs CPU**: the received and sent throughput of the physical ports on the left axis and the dataplane CPU on the right axis. CPU that climbs faster than throughput, or throughput that flattens while CPU keeps rising, shows where the platform saturates.
+- **CPU vs Throughput**: a scatter plot of CPU against received throughput, one point per minute, the CPU-versus-throughput curve found in vendor test reports. Points piling up at 100% CPU mark the maximum throughput for the traffic mix.
+- **Packet Rate and Connection Rate**, **Sessions** (with session-table utilization on Palo Alto, NPU offload on Fortinet) and **Drops and Interface Errors** for the duration of the ramp.
+
+Throughput comes from the cumulative interface counters (IF-MIB on the SNMP dashboards, hardware `ibytes` / `obytes` on the API dashboards). For traffic that transits the firewall, the total received on the physical ports is the offered load and matches the throughput figure a test report quotes; the sent total is lower when the firewall drops traffic. Drops are counted from the cumulative drop counters (PAN-COMMON-MIB flow counters, XML API `severity=drop` global counters, or FortiGate processor drop counters), so a clean run reads 0.
+
+For a live demonstration, pick a short time range such as **Last 15 minutes** with the dashboard's automatic refresh; the SNMP load data and the API session and interface counters refresh every 20 seconds, while the API per-core dataplane CPU is the one-minute resource-monitor average and lags the throughput by up to a minute.
 
 ## Python Generator
 
@@ -797,6 +811,7 @@ Notes:
 - An **Ingress Backlog by Dataplane** overview panel, a link-utilization table (interface, In %, Out %, rates, and speed, readable without scrolling), worst-dataplane resource pressure, and the global drop rate stacked by counter category.
 - Collapsible sections for HA (role timeline, sync state, and an **HA Links and Monitoring** table), interfaces and errors/discards, a **VSYS** section and a **Dataplanes** section whose panels repeat side by side for every VSYS or dataplane, zones and logical interfaces, session protocols, DoS/zone-protection drops, filtered global counters, MP load/storage, and environmental sensors split into temperature, fan, power, and alarm panels.
 - A collapsed **Logging and Management Health** section: log rate, logs discarded, content versions, management processes not running, GlobalProtect users, and RAID state.
+- A collapsed **Load Test** section with the peak figures of the selected range, a throughput-versus-dataplane-CPU ramp and the CPU-versus-throughput curve, described in [Follow a Load Test](#follow-a-load-test).
 
 The XML API reveals dataplane saturation that SNMP hides. SNMP and the API both report the average of all dataplane cores, including cores that never process packets and stay at 0%. On a PA-5500, for example, both report about 57% while every active core is above 90%. The API dashboards therefore also show the hottest core, the active-core average, and a per-core load map for every dataplane.
 
