@@ -614,6 +614,19 @@ def parse_interface_counters(result: ET.Element) -> list[tuple[dict, dict]]:
             value = _number(entry.findtext(f"port/{source}"))
             if value is not None:
                 fields[destination] = value
+        # ibytes/obytes and ipackets/opackets are maintained by the dataplane and
+        # miss hardware-offloaded flows; the MAC-level port counters see every
+        # frame on the wire, like SNMP ifHCInOctets. Prefer them when present.
+        for direction, octets, packets in (("rx", "in_octets", "in_packets"), ("tx", "out_octets", "out_packets")):
+            value = _number(entry.findtext(f"port/{direction}-bytes"))
+            if value is not None:
+                fields[octets] = value
+            frames = [
+                _number(entry.findtext(f"port/{direction}-{kind}"))
+                for kind in ("unicast", "multicast", "broadcast")
+            ]
+            if all(frame is not None for frame in frames):
+                fields[packets] = sum(frames)
         if fields:
             points.append(({"interface": interface}, fields))
     return points

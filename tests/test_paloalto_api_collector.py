@@ -282,6 +282,44 @@ class CollectorParsingTests(unittest.TestCase):
             ],
         )
 
+    def test_port_mac_counters_include_offloaded_traffic(self):
+        # Shape of PAN-OS 11/12 output under a load test with offloaded UDP:
+        # the dataplane ibytes/obytes counted only about half of the traffic.
+        result = ET.fromstring(
+            "<result><hw><entry><name>ethernet1/11</name>"
+            "<ibytes>13923248051098</ibytes><obytes>23137800987779</obytes>"
+            "<ipackets>77527388823</ipackets><opackets>37396997934</opackets>"
+            "<ierrors>0</ierrors><idrops>0</idrops>"
+            "<port><link-down>0</link-down><rx-broadcast>16</rx-broadcast>"
+            "<rx-bytes>34276928149555</rx-bytes><rx-discards>0</rx-discards>"
+            "<rx-error>0</rx-error><rx-multicast>95833</rx-multicast>"
+            "<rx-unicast>91353449553</rx-unicast><tx-broadcast>49</tx-broadcast>"
+            "<tx-bytes>26526647391272</tx-bytes><tx-error>0</tx-error>"
+            "<tx-multicast>10598</tx-multicast><tx-unicast>39630544405</tx-unicast>"
+            "</port></entry></hw></result>"
+        )
+        [(tags, fields)] = parse_interface_counters(result)
+        self.assertEqual(tags, {"interface": "ethernet1/11"})
+        self.assertEqual(fields["in_octets"], 34276928149555)
+        self.assertEqual(fields["out_octets"], 26526647391272)
+        self.assertEqual(fields["in_packets"], 91353449553 + 95833 + 16)
+        self.assertEqual(fields["out_packets"], 39630544405 + 10598 + 49)
+        self.assertEqual(fields["in_errors"], 0)
+        self.assertEqual(fields["in_discards"], 0)
+        self.assertEqual(fields["out_errors"], 0)
+        self.assertEqual(fields["link_down_count"], 0)
+
+    def test_partial_port_frame_counters_keep_dataplane_packets(self):
+        result = ET.fromstring(
+            "<result><hw><entry><name>ethernet1/1</name><ipackets>10</ipackets>"
+            "<opackets>20</opackets><port><rx-unicast>30</rx-unicast><tx-bytes>40</tx-bytes>"
+            "</port></entry></hw></result>"
+        )
+        self.assertEqual(
+            parse_interface_counters(result),
+            [({"interface": "ethernet1/1"}, {"in_packets": 10, "out_packets": 20, "out_octets": 40})],
+        )
+
     def test_interface_status_merges_hardware_and_logical_details(self):
         result = ET.fromstring(
             "<result><hw><entry><name>ethernet1/1</name><speed>1000</speed>"
