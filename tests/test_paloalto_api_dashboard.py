@@ -156,8 +156,11 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
             curve = panels["CPU vs Throughput"]
             self.assertEqual(curve["type"], "xychart")
             self.assertEqual(curve["options"]["mapping"], "manual")
-            self.assertEqual([s["x"]["matcher"]["options"] for s in curve["options"]["series"]], ["throughput_bps"] * 2)
-            self.assertEqual([s["y"]["matcher"]["options"] for s in curve["options"]["series"]], ["dp_cpu_pct", "hottest_core_pct"])
+            # Matchers name the display names set by the overrides: Grafana
+            # matches fields by display name, so the raw column names find nothing.
+            self.assertEqual([s["x"]["matcher"]["options"] for s in curve["options"]["series"]], ["Throughput received"] * 2)
+            self.assertEqual([s["y"]["matcher"]["options"] for s in curve["options"]["series"]], ["DP CPU (average)", "Hottest DP core"])
+            self.assertEqual([s["name"]["fixed"] for s in curve["options"]["series"]], ["DP CPU (average)", "Hottest DP core"])
             self.assertIn("aggregateWindow(every: 1m", curve["targets"][0]["query"])
             self.assertIn('pivot(rowKey: ["_time"], columnKey: ["_field"]', curve["targets"][0]["query"])
             for title in ("Packet Rate and Connection Rate", "Sessions and Session Table", "Drops and Interface Errors"):

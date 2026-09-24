@@ -204,8 +204,16 @@ def peak(panel_id: int, title: str, query: str, x: int, y: int, unit: str, *, le
 
 
 def xychart(panel_id: int, title: str, query: str, x: int, y: int, w: int, h: int, x_field: str,
-            series: list[tuple[str, str]], description: str = "") -> dict:
-    """Scatter plot of ``series`` (field, label) against ``x_field``."""
+            series: list[tuple[str, str]], description: str = "", *, x_label: str | None = None) -> dict:
+    """Scatter plot of ``series`` (field, label) against ``x_field``.
+
+    ``x_field`` and ``series`` name the Flux columns; every column gets an
+    override that sets its display name, and the manual series mapping refers
+    to those display names because Grafana matches fields by display name
+    once overrides are applied (a matcher on the raw column name finds
+    nothing and the panel shows "No data").
+    """
+    x_label = x_label or x_field
     return {
         "datasource": DATASOURCE,
         "fieldConfig": {
@@ -232,8 +240,8 @@ def xychart(panel_id: int, title: str, query: str, x: int, y: int, w: int, h: in
             "mapping": "manual",
             "series": [
                 {
-                    "x": {"matcher": {"id": "byName", "options": x_field}},
-                    "y": {"matcher": {"id": "byName", "options": field}},
+                    "x": {"matcher": {"id": "byName", "options": x_label}},
+                    "y": {"matcher": {"id": "byName", "options": label}},
                     "name": {"fixed": label},
                 }
                 for field, label in series
@@ -695,7 +703,8 @@ from(bucket: "firewalls")
   |> keep(columns: ["_time", "throughput_bps", "dp_cpu_pct", "hottest_core_pct"])
   |> sort(columns: ["_time"])'''
     ), 0, 14, 12, 10, "throughput_bps", [("dp_cpu_pct", "DP CPU (average)"), ("hottest_core_pct", "Hottest DP core")],
-        "Dataplane CPU as a function of the received throughput, one point per minute of the selected range: the CPU-versus-throughput curve of a performance test report. Points that pile up at 100% CPU mark the maximum throughput of the platform for this traffic mix.")
+        "Dataplane CPU as a function of the received throughput, one point per minute of the selected range: the CPU-versus-throughput curve of a performance test report. Points that pile up at 100% CPU mark the maximum throughput of the platform for this traffic mix.",
+        x_label="Throughput received")
     curve["fieldConfig"]["overrides"] = [
         override("throughput_bps", displayName="Throughput received", unit="bps"),
         override("dp_cpu_pct", displayName="DP CPU (average)", unit="percent", min=0, max=100),
