@@ -41,7 +41,7 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
             "Interfaces",
             "API Interface Details",
             "Interface Errors / Discards",
-            "Dataplane ${dataplane}",
+            "Dataplanes",
             "API Session Details",
             "Data Plane Pressure and Key Drops",
             "Advanced Resource Troubleshooting - Management Plane",
@@ -49,7 +49,11 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(rows))
         self.assertTrue(all(rows[title]["collapsed"] for title in expected))
-        self.assertEqual(rows["Dataplane ${dataplane}"]["repeat"], "dataplane")
+        self.assertNotIn("repeat", rows["Dataplanes"])
+        for panel in rows["Dataplanes"]["panels"]:
+            self.assertEqual(panel["repeat"], "dataplane")
+            self.assertEqual(panel["repeatDirection"], "h")
+            self.assertEqual(panel["gridPos"]["w"], 24)
 
     def test_active_physical_interfaces_get_repeated_api_panels(self):
         rows = {
@@ -92,10 +96,10 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
             "Logging and Management Health",
             "Interfaces",
             "Interface Errors / Discards",
-            "VSYS ${vsys}",
+            "VSYS",
             "Data Plane Pressure and Key Drops",
             "Filtered Global Drop Counters",
-            "Dataplane ${dataplane}",
+            "Dataplanes",
             "API Session Details",
             "Zones, Logical Interfaces and Drop Reasons",
             "Advanced Resource Troubleshooting - Management Plane",
@@ -107,10 +111,13 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
                           "Hottest DP Core", "Interface Load (last 5 minutes)"):
                 self.assertIn(title, titles)
             rows = {panel["title"]: panel for panel in dashboard["panels"] if panel["type"] == "row"}
-            self.assertEqual(rows["VSYS ${vsys}"]["repeat"], "vsys")
-            vsys_titles = [panel["title"] for panel in rows["VSYS ${vsys}"]["panels"]]
-            self.assertEqual(vsys_titles, ["VSYS Sessions", "VSYS CPS", "VSYS Throughput by Zone"])
-            cps = rows["VSYS ${vsys}"]["panels"][1]["targets"][0]["query"]
+            self.assertNotIn("repeat", rows["VSYS"])
+            vsys_titles = [panel["title"] for panel in rows["VSYS"]["panels"]]
+            self.assertEqual(vsys_titles, ["VSYS Sessions - ${vsys}", "VSYS CPS - ${vsys}", "VSYS Throughput by Zone - ${vsys}"])
+            for panel in rows["VSYS"]["panels"]:
+                self.assertEqual((panel["repeat"], panel["repeatDirection"], panel["gridPos"]["w"]), ("vsys", "h", 24))
+            self.assertFalse([panel for panel in dashboard["panels"] if panel["type"] == "row" and "repeat" in panel])
+            cps = rows["VSYS"]["panels"][1]["targets"][0]["query"]
             self.assertIn('r._measurement == "paloalto_api_vsys"', cps)
             self.assertIn("cps|packet_rate_pps", cps)
             drop_titles = [panel["title"] for panel in rows["Data Plane Pressure and Key Drops"]["panels"]]
@@ -131,12 +138,27 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
             self.assertEqual(row_positions, sorted(row_positions))
             self.assertEqual(len(row_positions), len(set(row_positions)))
 
-    def test_cpu_overview_exposes_hottest_core(self):
-        panel = next(panel for panel in self.dashboard["panels"] if panel.get("title") == "CPU MP / DP")
-        query = panel["targets"][0]["query"]
-        self.assertIn('r.core == "average"', query)
-        self.assertIn('r.core != "average"', query)
-        self.assertIn("fn: max", query)
+    def test_cpu_overview_shows_dataplane_averages_only(self):
+        for dashboard, title in ((self.dashboard, "CPU MP / DP"), (self.chassis_dashboard, "CPU MP / DP by Slot")):
+            query = self._panel(dashboard, title)["targets"][0]["query"]
+            self.assertIn('r._field == "mp_cpu_pct"', query)
+            self.assertIn('r.core == "average"', query)
+            self.assertIn("All dataplanes (average)", query)
+            self.assertIn("r.count > 1", query)
+            self.assertNotIn('r.core != "average"', query)
+            self.assertNotIn("cpu_max_pct", query)
+
+    def test_interface_load_table_fits_without_scrolling(self):
+        panel = self._panel(self.dashboard, "Interface Load (last 5 minutes)")
+        order = panel["transformations"][0]["options"]["indexByName"]
+        self.assertEqual(sorted(order, key=order.get), ["interface", "in_pct", "out_pct", "in_bps", "out_bps", "speed_bps"])
+        widths = {
+            item["matcher"]["options"]: prop["value"]
+            for item in panel["fieldConfig"]["overrides"]
+            for prop in item["properties"]
+            if prop["id"] == "custom.width"
+        }
+        self.assertEqual(set(widths), set(order))
 
     @staticmethod
     def _all_panels(dashboard):
@@ -154,12 +176,10 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
             tile = self._panel(dashboard, "Hottest DP Core")["targets"][0]["query"]
             self.assertIn("r._field =~ /^cpu_(max_)?pct$/", tile)
             self.assertIn("fn: max", tile)
-            cpu_title = "CPU MP / DP" if dashboard is self.dashboard else "CPU MP / DP by Slot"
-            for title in (cpu_title, "CPU Summary - ${dataplane}"):
-                query = self._panel(dashboard, title)["targets"][0]["query"]
-                self.assertIn('r._field == "cpu_max_pct"', query)
-                self.assertIn("(peak)", query)
-                self.assertIn('r._field == "cpu_pct"', query)
+            query = self._panel(dashboard, "CPU Summary - ${dataplane}")["targets"][0]["query"]
+            self.assertIn('r._field == "cpu_max_pct"', query)
+            self.assertIn("(peak)", query)
+            self.assertIn('r._field == "cpu_pct"', query)
 
     def test_overview_shows_ingress_backlog(self):
         for dashboard in (self.dashboard, self.chassis_dashboard):
@@ -327,7 +347,7 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
         self.assertIn("Chassis Power", rows)
         self.assertIn("Thermal, Fans and Power Sensors", rows)
         self.assertIn("Filtered Global Drop Counters", rows)
-        self.assertEqual(rows["Dataplane ${dataplane}"]["repeat"], "dataplane")
+        self.assertIn("Dataplanes", rows)
         serialized = json.dumps(self.chassis_dashboard)
         self.assertIn("paloalto_api_chassis_inventory", serialized)
         self.assertIn("paloalto_api_chassis_status", serialized)

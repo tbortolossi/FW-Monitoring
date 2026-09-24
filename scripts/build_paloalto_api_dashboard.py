@@ -384,15 +384,24 @@ join(tables: {{rate: rates, link: speed}}, on: ["interface"])
   |> sort(columns: ["peak_pct"], desc: true)
 ''', 14, 25, 10, 10, "Current link utilization of every physical port with a negotiated speed, busiest first. Calculated from hardware octet counters and the speed reported by show interface all.")
     gauge = {"type": "gauge", "mode": "basic", "valueDisplayMode": "text"}
+    # Explicit widths keep every column visible in the 10-unit-wide panel
+    # without a horizontal scrollbar; the organize step puts the interface
+    # name first and the load bars right next to it.
     interface_load["fieldConfig"]["overrides"] = [
-        override("interface", displayName="Interface"),
-        override("speed_bps", displayName="Speed", unit="bps"),
-        override("in_bps", displayName="In", unit="bps", decimals=1),
-        override("out_bps", displayName="Out", unit="bps", decimals=1),
-        override("in_pct", displayName="In %", unit="percent", decimals=1, min=0, max=100, custom__cellOptions=gauge, thresholds=LOAD_THRESHOLDS, color={"mode": "thresholds"}),
-        override("out_pct", displayName="Out %", unit="percent", decimals=1, min=0, max=100, custom__cellOptions=gauge, thresholds=LOAD_THRESHOLDS, color={"mode": "thresholds"}),
-        override("peak_pct", custom__hidden=True),
+        override("interface", displayName="Interface", custom__width=110),
+        override("speed_bps", displayName="Speed", unit="bps", decimals=0, custom__width=75),
+        override("in_bps", displayName="In", unit="bps", decimals=1, custom__width=85),
+        override("out_bps", displayName="Out", unit="bps", decimals=1, custom__width=85),
+        override("in_pct", displayName="In %", unit="percent", decimals=1, min=0, max=100, custom__cellOptions=gauge, custom__width=100, thresholds=LOAD_THRESHOLDS, color={"mode": "thresholds"}),
+        override("out_pct", displayName="Out %", unit="percent", decimals=1, min=0, max=100, custom__cellOptions=gauge, custom__width=100, thresholds=LOAD_THRESHOLDS, color={"mode": "thresholds"}),
     ]
+    interface_load["transformations"] = [{
+        "id": "organize",
+        "options": {
+            "excludeByName": {"peak_pct": True},
+            "indexByName": {"interface": 0, "in_pct": 1, "out_pct": 2, "in_bps": 3, "out_bps": 4, "speed_bps": 5},
+        },
+    }]
     return [
         guide_lines(percent_range(timeseries(2, "CPU MP / DP", '''
 management = from(bucket: "firewalls")
@@ -401,27 +410,22 @@ management = from(bucket: "firewalls")
   |> map(fn: (r) => ({ r with _field: "Management plane" }))
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-averages = from(bucket: "firewalls")
+dataplanes = from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r._field == "cpu_pct" and r.core == "average")
-  |> map(fn: (r) => ({ r with _field: r.dataplane + " average" }))
+  |> map(fn: (r) => ({ r with _field: r.dataplane }))
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-hottest = from(bucket: "firewalls")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r._field == "cpu_pct" and r.core != "average")
-  |> map(fn: (r) => ({ r with _field: r.dataplane + " hottest core" }))
+overall = dataplanes
+  |> group(columns: ["_time"])
+  |> reduce(identity: {total: 0.0, count: 0}, fn: (r, accumulator) => ({ total: accumulator.total + r._value, count: accumulator.count + 1 }))
+  |> filter(fn: (r) => r.count > 1)
+  |> map(fn: (r) => ({ _time: r._time, _field: "All dataplanes (average)", _value: r.total / float(v: r.count) }))
   |> group(columns: ["_field"])
-  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
-peaks = from(bucket: "firewalls")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r._field == "cpu_max_pct" and r.core != "average")
-  |> map(fn: (r) => ({ r with _field: r.dataplane + " hottest core (peak)", _value: float(v: r._value) }))
-  |> group(columns: ["_field"])
-  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
-union(tables: [management, averages, hottest, peaks])
+  |> sort(columns: ["_time"])
+union(tables: [management, overall, dataplanes])
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 8, 12, 10, "percent", "Management-plane CPU, the all-core average of every dataplane (equivalent to SNMP), the busiest core of every dataplane (one-minute average) and its peak within the minute. Dashed lines mark 70% and 90%. Per-core curves are in the repeated Dataplane rows."))),
+''', 0, 8, 12, 10, "percent", "Management-plane CPU, the average of all dataplanes (only when the firewall has more than one) and the all-core average of each dataplane (equivalent to SNMP). Dashed lines mark 70% and 90%. The Hottest DP Core tile and the Dataplanes row show per-core load and imbalance."))),
         guide_lines(percent_range(timeseries(3, "MP RAM Usage", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -624,8 +628,10 @@ def zone_rows() -> list[dict]:
   |> group(columns: ["_field"])
 '''
     return [
-        row(9009, "VSYS ${vsys}", 0, [
-            timeseries(3101, "VSYS Sessions", '''
+        # Panels repeat per VSYS instead of the row, like the Dataplanes row:
+        # cloned rows get a different title font and side-by-side VSYS compare better.
+        row(9009, "VSYS", 0, [
+            repeated_panel(timeseries(3101, "VSYS Sessions - ${vsys}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_vsys" and r.hostname == "${hostname}" and r.vsys == "${vsys}" and r._field =~ /^sessions_(active|max)$/)
@@ -633,8 +639,8 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 0, 12, 8, "short", "Sessions per VSYS summed across dataplanes from show session meter. The limit appears when a VSYS session resource limit is configured."),
-            timeseries(3103, "VSYS CPS", '''
+''', 0, 0, 24, 8, "short", "Sessions per VSYS summed across dataplanes from show session meter. The limit appears when a VSYS session resource limit is configured."), "vsys", max_per_row=4),
+            repeated_panel(timeseries(3103, "VSYS CPS - ${vsys}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_vsys" and r.hostname == "${hostname}" and r.vsys == "${vsys}" and r._field =~ /^(cps|packet_rate_pps)$/)
@@ -642,13 +648,13 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 12, 0, 12, 8, "short", "New sessions per second and packet rate of this VSYS from show session info scoped to the VSYS (SNMP panVsysTotalCps equivalent). PAN-OS exposes no per-zone CPS through the XML API."),
-            timeseries(3102, "VSYS Throughput by Zone", f'''
+''', 0, 8, 24, 8, "short", "New sessions per second and packet rate of this VSYS from show session info scoped to the VSYS (SNMP panVsysTotalCps equivalent). PAN-OS exposes no per-zone CPS through the XML API."), "vsys", max_per_row=4),
+            repeated_panel(timeseries(3102, "VSYS Throughput by Zone - ${vsys}", f'''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => {logical} and r.vsys == "${{vsys}}" and exists r.zone and r._field =~ /^(in|out)_octets$/)
-{zone_throughput}''', 0, 8, 24, 8, "bps", "Logical interface octet counters of this VSYS summed by zone. In is traffic received from the zone."),
-        ], repeat="vsys"),
+{zone_throughput}''', 0, 16, 24, 8, "bps", "Logical interface octet counters of this VSYS summed by zone. In is traffic received from the zone."), "vsys", max_per_row=2),
+        ]),
         row(9010, "Zones, Logical Interfaces and Drop Reasons", 0, [
             timeseries(3111, "Throughput by Zone", f'''
 from(bucket: "firewalls")
@@ -691,26 +697,14 @@ from(bucket: "firewalls")
 
 
 def dataplane_row() -> dict:
-    return row(9002, "Dataplane ${dataplane}", 0, [
-        guide_lines(percent_range(timeseries(12, "CPU per Core - ${dataplane}", '''
-from(bucket: "firewalls")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r.core != "average" and r._field == "cpu_pct")
-  |> map(fn: (r) => ({ r with _field: "Core " + r.core }))
-  |> group(columns: ["_field"])
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 0, 12, 10, "percent", "One repeated row is created for every dataplane returned by PAN-OS."))),
-        percent_range(timeseries(13, "Resource Utilization - ${dataplane}", '''
-from(bucket: "firewalls")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_resources" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r._field == "utilization_pct")
-  |> map(fn: (r) => ({ r with _field: r.resource }))
-  |> group(columns: ["_field"])
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> keep(columns: ["_time", "_field", "_value"])
-''', 12, 0, 12, 10, "percent", "Session, packet-buffer, packet-descriptor and software-tag pressure reported by resource-monitor.")),
-        guide_lines(percent_range(timeseries(3201, "CPU Summary - ${dataplane}", '''
+    """One row for every dataplane, with panels repeated side by side.
+
+    Panels repeat horizontally instead of repeating the whole row: Grafana
+    renders the titles of cloned rows in a different font, and side-by-side
+    dataplanes are easier to compare.
+    """
+    return row(9002, "Dataplanes", 0, [
+        repeated_panel(guide_lines(percent_range(timeseries(3201, "CPU Summary - ${dataplane}", '''
 cores = from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r._field == "cpu_pct")
@@ -737,8 +731,8 @@ peak = from(bucket: "firewalls")
   |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
 union(tables: [average, active, hottest, peak])
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 10, 12, 12, "percent", "The all-core average matches SNMP. Cores reporting 0% (not used for packet processing) are excluded from the active-core average, which shows the real load of the packet-processing cores. Hottest core is the busiest one-minute average; the peak series is the highest per-core value sampled within each minute."))),
-        status_history(3202, "Core Load Map - ${dataplane}", '''
+''', 0, 0, 24, 9, "percent", "The all-core average matches SNMP. Cores reporting 0% (not used for packet processing) are excluded from the active-core average, which shows the real load of the packet-processing cores. Hottest core is the busiest one-minute average; the peak series is the highest per-core value sampled within each minute."))), "dataplane", max_per_row=4),
+        repeated_panel(status_history(3202, "Core Load Map - ${dataplane}", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r.core != "average" and r._field == "cpu_pct")
@@ -746,8 +740,26 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 12, 10, 12, 12, "One line per core colored by load, readable even on 64+ core dataplanes."),
-    ], repeat="dataplane")
+''', 0, 9, 24, 10, "One line per core colored by load, readable even on 64+ core dataplanes."), "dataplane", max_per_row=2),
+        repeated_panel(guide_lines(percent_range(timeseries(12, "CPU per Core - ${dataplane}", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r.core != "average" and r._field == "cpu_pct")
+  |> map(fn: (r) => ({ r with _field: "Core " + r.core }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 0, 19, 24, 10, "percent", "One panel is created for every dataplane returned by PAN-OS."))), "dataplane", max_per_row=2),
+        repeated_panel(percent_range(timeseries(13, "Resource Utilization - ${dataplane}", '''
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_resources" and r.hostname == "${hostname}" and r.dataplane == "${dataplane}" and r._field == "utilization_pct")
+  |> map(fn: (r) => ({ r with _field: r.resource }))
+  |> group(columns: ["_field"])
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_field", "_value"])
+''', 0, 29, 24, 9, "percent", "Session, packet-buffer, packet-descriptor and software-tag pressure reported by resource-monitor.")), "dataplane", max_per_row=4),
+    ])
 
 
 def session_row() -> dict:
