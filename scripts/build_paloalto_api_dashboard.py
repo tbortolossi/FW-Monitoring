@@ -416,17 +416,24 @@ def kpi_panels(y: int) -> list[dict]:
     return [
         kpi(3001, "DP CPU (avg)", current_value("paloalto_api_dataplane_cpu", "cpu_pct", "DP CPU", ' and r.core == "average"'), 0, y, "percent",
             levels=LOAD_THRESHOLDS, description="Highest per-dataplane average across all cores. This is the value SNMP reports."),
-        kpi(3002, "Hottest DP Core", current_value("paloalto_api_dataplane_cpu", "/^cpu_(max_)?pct$/", "Hottest core", ' and r.core != "average"'), 3, y, "percent",
+        kpi(3009, "DP CPU (active cores)", current_value("paloalto_api_dataplane_cpu", "cpu_active_pct", "DP CPU (active cores)", ' and r.core == "average"'), 3, y, "percent",
+            levels=LOAD_THRESHOLDS, description=(
+                "Highest per-dataplane average over the cores that process packets. PAN-OS lists every core of a dataplane, "
+                "but only the pan task cores carry traffic (for example 80 of 128 on a PA-5580 dataplane); the others stay at 0% "
+                "and pull the all-core average (DP CPU avg, the SNMP value) far below the real load. Cores with no load at all "
+                "during the minute are excluded."
+            )),
+        kpi(3002, "Hottest DP Core", current_value("paloalto_api_dataplane_cpu", "/^cpu_(max_)?pct$/", "Hottest core", ' and r.core != "average"'), 6, y, "percent",
             levels=LOAD_THRESHOLDS, description=(
                 "Busiest individual dataplane core. Uses the per-core peak within each minute (cpu_max_pct) when the collector "
                 "provides it and falls back to the per-core one-minute average (cpu_pct): both fields are merged and the highest "
                 "value per minute wins. A high value with a lower average reveals imbalance or saturated cores hidden by the average."
             )),
-        kpi(3003, "MP CPU", current_value("paloalto_api_management", "mp_cpu_pct", "MP CPU"), 6, y, "percent", levels=LOAD_THRESHOLDS),
-        kpi(3004, "MP RAM", current_value("paloalto_api_management", "memory_used_pct", "MP RAM"), 9, y, "percent",
+        kpi(3003, "MP CPU", current_value("paloalto_api_management", "mp_cpu_pct", "MP CPU"), 9, y, "percent", levels=LOAD_THRESHOLDS, w=2),
+        kpi(3004, "MP RAM", current_value("paloalto_api_management", "memory_used_pct", "MP RAM"), 11, y, "percent", w=2,
             levels=thresholds(("green", None), ("#EAB839", 85), ("red", 95))),
-        kpi(3005, "Active Sessions", current_value("paloalto_api_sessions", "sessions_active", "Sessions"), 12, y, "short"),
-        kpi(3006, "Session Table", current_value("paloalto_api_sessions", "session_utilization_pct", "Session table"), 15, y, "percent",
+        kpi(3005, "Active Sessions", current_value("paloalto_api_sessions", "sessions_active", "Sessions"), 13, y, "short"),
+        kpi(3006, "Session Table", current_value("paloalto_api_sessions", "session_utilization_pct", "Session table"), 16, y, "percent", w=2,
             levels=thresholds(("green", None), ("#EAB839", 80), ("red", 90))),
         kpi(3007, "CPS", current_value("paloalto_api_sessions", "cps", "CPS"), 18, y, "cps"),
         kpi(3008, "Throughput (In + Out)", f'''
@@ -513,9 +520,16 @@ overall = dataplanes
   |> map(fn: (r) => ({ _time: r._time, _field: "All dataplanes (average)", _value: r.total / float(v: r.count) }))
   |> group(columns: ["_field"])
   |> sort(columns: ["_time"])
-union(tables: [management, overall, dataplanes])
+active = from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_dataplane_cpu" and r.hostname == "${hostname}" and r._field == "cpu_active_pct" and r.core == "average")
+  |> group()
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> map(fn: (r) => ({ _time: r._time, _field: "Dataplanes (active cores)", _value: r._value }))
+  |> group(columns: ["_field"])
+union(tables: [management, overall, active, dataplanes])
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 8, 12, 10, "percent", "Management-plane CPU, the average of all dataplanes (only when the firewall has more than one) and the all-core average of each dataplane (equivalent to SNMP). Dashed lines mark 70% and 90%. The Hottest DP Core tile and the Dataplanes row show per-core load and imbalance."))),
+''', 0, 8, 12, 10, "percent", "Management-plane CPU, the average of all dataplanes (only when the firewall has more than one), the all-core average of each dataplane (equivalent to SNMP) and the average of the packet-processing cores of all dataplanes (active cores: cores at 0% for the whole minute are excluded, which is the real load when PAN-OS lists reserved cores). Dashed lines mark 70% and 90%. The Hottest DP Core tile and the Dataplanes row show per-core load and imbalance."))),
         guide_lines(percent_range(timeseries(3, "MP RAM Usage", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -612,11 +626,14 @@ from(bucket: "firewalls")
 '''
 
 
-def dataplane_cpu(label: str, window: str = "v.windowPeriod", *, hottest: bool = False) -> str:
-    """Average of the dataplane all-core averages, or the hottest core of any dataplane."""
+def dataplane_cpu(label: str, window: str = "v.windowPeriod", *, hottest: bool = False, active: bool = False) -> str:
+    """Average of the dataplane all-core (or active-core) averages, or the hottest core of any dataplane."""
     if hottest:
         selector = 'r._field =~ /^cpu_(max_)?pct$/ and r.core != "average"'
         fn = "max"
+    elif active:
+        selector = 'r._field == "cpu_active_pct" and r.core == "average"'
+        fn = "mean"
     else:
         selector = 'r._field == "cpu_pct" and r.core == "average"'
         fn = "mean"
@@ -690,30 +707,34 @@ from(bucket: "firewalls")
     ]
     ramp = timeseries(3611, "Throughput vs Dataplane CPU", (
         named(received, "received") + named(sent, "sent")
-        + named(dataplane_cpu("DP CPU (average)"), "cpu") + named(dataplane_cpu("Hottest DP core", hottest=True), "hottest")
-        + '''union(tables: [received, sent, cpu, hottest])
+        + named(dataplane_cpu("DP CPU (average)"), "cpu") + named(dataplane_cpu("DP CPU (active cores)", active=True), "active")
+        + named(dataplane_cpu("Hottest DP core", hottest=True), "hottest")
+        + '''union(tables: [received, sent, cpu, active, hottest])
   |> keep(columns: ["_time", "_field", "_value"])'''
     ), 0, 4, 24, 10, "bps", (
         "The load ramp: throughput of the physical ports (left axis) against dataplane CPU (right axis). "
         "CPU that climbs faster than throughput, or throughput that flattens while CPU keeps rising, shows where the platform saturates. "
+        "DP CPU (active cores) leaves out the cores PAN-OS lists but does not use for packet processing: it is the load that reaches 100% at saturation. "
         "The dataplane CPU is the one-minute resource-monitor average, so it lags the 20-second throughput by up to a minute."
     ))
     right_axis(ramp, "/CPU|core/", "percent", percent=True)
     curve = xychart(3612, "CPU vs Throughput", (
         named(physical_rate("in_octets", "throughput_bps", "1m"), "throughput")
-        + named(dataplane_cpu("dp_cpu_pct", "1m"), "cpu") + named(dataplane_cpu("hottest_core_pct", "1m", hottest=True), "hottest")
-        + '''union(tables: [throughput, cpu, hottest])
+        + named(dataplane_cpu("dp_cpu_pct", "1m"), "cpu") + named(dataplane_cpu("active_core_pct", "1m", active=True), "active")
+        + named(dataplane_cpu("hottest_core_pct", "1m", hottest=True), "hottest")
+        + '''union(tables: [throughput, cpu, active, hottest])
   |> group()
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
   |> filter(fn: (r) => exists r.throughput_bps and exists r.dp_cpu_pct)
-  |> keep(columns: ["_time", "throughput_bps", "dp_cpu_pct", "hottest_core_pct"])
+  |> keep(columns: ["_time", "throughput_bps", "dp_cpu_pct", "active_core_pct", "hottest_core_pct"])
   |> sort(columns: ["_time"])'''
-    ), 0, 14, 12, 10, "throughput_bps", [("dp_cpu_pct", "DP CPU (average)"), ("hottest_core_pct", "Hottest DP core")],
+    ), 0, 14, 12, 10, "throughput_bps", [("dp_cpu_pct", "DP CPU (average)"), ("active_core_pct", "DP CPU (active cores)"), ("hottest_core_pct", "Hottest DP core")],
         "Dataplane CPU as a function of the received throughput, one point per minute of the selected range: the CPU-versus-throughput curve of a performance test report. Points that pile up at 100% CPU mark the maximum throughput of the platform for this traffic mix.",
         x_label="Throughput received")
     curve["fieldConfig"]["overrides"] = [
         override("throughput_bps", displayName="Throughput received", unit="bps"),
         override("dp_cpu_pct", displayName="DP CPU (average)", unit="percent", min=0, max=100),
+        override("active_core_pct", displayName="DP CPU (active cores)", unit="percent", min=0, max=100),
         override("hottest_core_pct", displayName="Hottest DP core", unit="percent", min=0, max=100),
     ]
     rates = timeseries(3613, "Packet Rate and Connection Rate", (

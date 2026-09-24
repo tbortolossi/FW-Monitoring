@@ -224,6 +224,75 @@
         "x": 3,
         "y": 4
       },
+      "id": 3009,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "from(bucket: \"firewalls\")\n  |> range(start: -30m)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_active_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> max()\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ _time: r._time, _field: \"DP CPU (active cores)\", _value: float(v: r._value) }))",
+          "refId": "A"
+        }
+      ],
+      "title": "DP CPU (active cores)",
+      "type": "stat",
+      "description": "Highest per-dataplane average over the cores that process packets. PAN-OS lists every core of a dataplane, but only the pan task cores carry traffic (for example 80 of 128 on a PA-5580 dataplane); the others stay at 0% and pull the all-core average (DP CPU avg, the SNMP value) far below the real load. Cores with no load at all during the minute are excluded.\n\nSource: `show running resource-monitor minute last 1` via the PAN-OS XML API, polled every 1 min by default."
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {},
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 4
+      },
       "id": 3002,
       "options": {
         "colorMode": "background",
@@ -289,8 +358,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 3,
-        "x": 6,
+        "w": 2,
+        "x": 9,
         "y": 4
       },
       "id": 3003,
@@ -358,8 +427,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 3,
-        "x": 9,
+        "w": 2,
+        "x": 11,
         "y": 4
       },
       "id": 3004,
@@ -419,7 +488,7 @@
       "gridPos": {
         "h": 4,
         "w": 3,
-        "x": 12,
+        "x": 13,
         "y": 4
       },
       "id": 3005,
@@ -487,8 +556,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 3,
-        "x": 15,
+        "w": 2,
+        "x": 16,
         "y": 4
       },
       "id": 3006,
@@ -711,13 +780,13 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "management = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"mp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Management plane\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\ndataplanes = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\noverall = dataplanes\n  |> group(columns: [\"_time\"])\n  |> reduce(identity: {total: 0.0, count: 0}, fn: (r, accumulator) => ({ total: accumulator.total + r._value, count: accumulator.count + 1 }))\n  |> filter(fn: (r) => r.count > 1)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"All dataplanes (average)\", _value: r.total / float(v: r.count) }))\n  |> group(columns: [\"_field\"])\n  |> sort(columns: [\"_time\"])\nunion(tables: [management, overall, dataplanes])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+          "query": "management = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_management\" and r.hostname == \"${hostname}\" and r._field == \"mp_cpu_pct\")\n  |> map(fn: (r) => ({ r with _field: \"Management plane\" }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\ndataplanes = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _field: r.dataplane }))\n  |> group(columns: [\"_field\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\noverall = dataplanes\n  |> group(columns: [\"_time\"])\n  |> reduce(identity: {total: 0.0, count: 0}, fn: (r, accumulator) => ({ total: accumulator.total + r._value, count: accumulator.count + 1 }))\n  |> filter(fn: (r) => r.count > 1)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"All dataplanes (average)\", _value: r.total / float(v: r.count) }))\n  |> group(columns: [\"_field\"])\n  |> sort(columns: [\"_time\"])\nactive = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_active_pct\" and r.core == \"average\")\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Dataplanes (active cores)\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [management, overall, active, dataplanes])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
           "refId": "A"
         }
       ],
       "title": "CPU MP / DP",
       "type": "timeseries",
-      "description": "Management-plane CPU, the average of all dataplanes (only when the firewall has more than one) and the all-core average of each dataplane (equivalent to SNMP). Dashed lines mark 70% and 90%. The Hottest DP Core tile and the Dataplanes row show per-core load and imbalance.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show system resources` every 1 min\n- `show running resource-monitor minute last 1` every 1 min"
+      "description": "Management-plane CPU, the average of all dataplanes (only when the firewall has more than one), the all-core average of each dataplane (equivalent to SNMP) and the average of the packet-processing cores of all dataplanes (active cores: cores at 0% for the whole minute are excluded, which is the real load when PAN-OS lists reserved cores). Dashed lines mark 70% and 90%. The Hottest DP Core tile and the Dataplanes row show per-core load and imbalance.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show system resources` every 1 min\n- `show running resource-monitor minute last 1` every 1 min"
     },
     {
       "datasource": {
@@ -2135,13 +2204,13 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "received = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"in_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Received\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\nsent = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"out_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Sent\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\ncpu = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"DP CPU (average)\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field =~ /^cpu_(max_)?pct$/ and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Hottest DP core\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [received, sent, cpu, hottest])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
+              "query": "received = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"in_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Received\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\nsent = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"out_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Sent\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\ncpu = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"DP CPU (average)\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nactive = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_active_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"DP CPU (active cores)\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field =~ /^cpu_(max_)?pct$/ and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"Hottest DP core\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [received, sent, cpu, active, hottest])\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])",
               "refId": "A"
             }
           ],
           "title": "Throughput vs Dataplane CPU",
           "type": "timeseries",
-          "description": "The load ramp: throughput of the physical ports (left axis) against dataplane CPU (right axis). CPU that climbs faster than throughput, or throughput that flattens while CPU keeps rising, shows where the platform saturates. The dataplane CPU is the one-minute resource-monitor average, so it lags the 20-second throughput by up to a minute.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter interface all` every 20 s\n- `show running resource-monitor minute last 1` every 1 min"
+          "description": "The load ramp: throughput of the physical ports (left axis) against dataplane CPU (right axis). CPU that climbs faster than throughput, or throughput that flattens while CPU keeps rising, shows where the platform saturates. DP CPU (active cores) leaves out the cores PAN-OS lists but does not use for packet processing: it is the load that reaches 100% at saturation. The dataplane CPU is the one-minute resource-monitor average, so it lags the 20-second throughput by up to a minute.\n\nSources via the PAN-OS XML API, polled by default:\n\n- `show counter interface all` every 20 s\n- `show running resource-monitor minute last 1` every 1 min"
         },
         {
           "datasource": {
@@ -2200,6 +2269,30 @@
                   {
                     "id": "displayName",
                     "value": "DP CPU (average)"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "max",
+                    "value": 100
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "active_core_pct"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "DP CPU (active cores)"
                   },
                   {
                     "id": "unit",
@@ -2290,6 +2383,29 @@
                 "y": {
                   "matcher": {
                     "id": "byName",
+                    "options": "DP CPU (active cores)"
+                  }
+                },
+                "name": {
+                  "fixed": "DP CPU (active cores)"
+                }
+              },
+              {
+                "frame": {
+                  "matcher": {
+                    "id": "byIndex",
+                    "options": 0
+                  }
+                },
+                "x": {
+                  "matcher": {
+                    "id": "byName",
+                    "options": "Throughput received"
+                  }
+                },
+                "y": {
+                  "matcher": {
+                    "id": "byName",
                     "options": "Hottest DP core"
                   }
                 },
@@ -2316,7 +2432,7 @@
                 "type": "influxdb",
                 "uid": "P951FEA4DE68E13C5"
               },
-              "query": "throughput = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"in_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"throughput_bps\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\ncpu = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"dp_cpu_pct\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field =~ /^cpu_(max_)?pct$/ and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"hottest_core_pct\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [throughput, cpu, hottest])\n  |> group()\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> filter(fn: (r) => exists r.throughput_bps and exists r.dp_cpu_pct)\n  |> keep(columns: [\"_time\", \"throughput_bps\", \"dp_cpu_pct\", \"hottest_core_pct\"])\n  |> sort(columns: [\"_time\"])",
+              "query": "throughput = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and r._field == \"in_octets\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> map(fn: (r) => ({ _time: r._time, _field: \"throughput_bps\", _value: r._value * 8.0 }))\n  |> group(columns: [\"_field\"])\ncpu = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"dp_cpu_pct\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nactive = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field == \"cpu_active_pct\" and r.core == \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"active_core_pct\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nhottest = from(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_dataplane_cpu\" and r.hostname == \"${hostname}\" and r._field =~ /^cpu_(max_)?pct$/ and r.core != \"average\")\n  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))\n  |> group()\n  |> aggregateWindow(every: 1m, fn: max, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _field: \"hottest_core_pct\", _value: r._value }))\n  |> group(columns: [\"_field\"])\nunion(tables: [throughput, cpu, active, hottest])\n  |> group()\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> filter(fn: (r) => exists r.throughput_bps and exists r.dp_cpu_pct)\n  |> keep(columns: [\"_time\", \"throughput_bps\", \"dp_cpu_pct\", \"active_core_pct\", \"hottest_core_pct\"])\n  |> sort(columns: [\"_time\"])",
               "refId": "A"
             }
           ],
