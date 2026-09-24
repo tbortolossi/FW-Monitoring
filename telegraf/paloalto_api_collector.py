@@ -513,6 +513,16 @@ def parse_dataplane_resources(result: ET.Element) -> list[tuple[dict, dict]]:
         summary = {}
         if averages:
             summary["cpu_pct"] = sum(averages) / len(averages)
+            # PAN-OS lists every core of the dataplane, but only the pan task
+            # cores process packets (80 of 128 on a PA-5580 DP); the others stay
+            # at exactly 0% and halve the all-core average that SNMP reports.
+            active = [
+                fields["cpu_pct"]
+                for fields in cores
+                if "cpu_pct" in fields and fields.get("cpu_max_pct", fields["cpu_pct"]) > 0
+            ]
+            summary["cpu_active_pct"] = sum(active) / len(active) if active else 0.0
+            summary["active_cores"] = len(active)
         if maxima:
             summary["cpu_max_pct"] = max(maxima)
         points[(dataplane, "average")] = ({"dataplane": dataplane, "core": "average"}, summary)

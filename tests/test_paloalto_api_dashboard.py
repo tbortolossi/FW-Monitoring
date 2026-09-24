@@ -151,21 +151,38 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
             self.assertEqual(axis["matcher"], {"id": "byRegexp", "options": "/CPU|core/"})
             properties = {item["id"]: item["value"] for item in axis["properties"]}
             self.assertEqual((properties["unit"], properties["custom.axisPlacement"], properties["max"]), ("percent", "right", 100))
-            for label in ("Received", "Sent", "DP CPU (average)", "Hottest DP core"):
+            for label in ("Received", "Sent", "DP CPU (average)", "DP CPU (active cores)", "Hottest DP core"):
                 self.assertIn(f'_field: "{label}"', ramp["targets"][0]["query"])
             curve = panels["CPU vs Throughput"]
             self.assertEqual(curve["type"], "xychart")
             self.assertEqual(curve["options"]["mapping"], "manual")
             # Matchers name the display names set by the overrides: Grafana
             # matches fields by display name, so the raw column names find nothing.
-            self.assertEqual([s["x"]["matcher"]["options"] for s in curve["options"]["series"]], ["Throughput received"] * 2)
-            self.assertEqual([s["y"]["matcher"]["options"] for s in curve["options"]["series"]], ["DP CPU (average)", "Hottest DP core"])
-            self.assertEqual([s["name"]["fixed"] for s in curve["options"]["series"]], ["DP CPU (average)", "Hottest DP core"])
+            cpu_series = ["DP CPU (average)", "DP CPU (active cores)", "Hottest DP core"]
+            self.assertEqual([s["x"]["matcher"]["options"] for s in curve["options"]["series"]], ["Throughput received"] * 3)
+            self.assertEqual([s["y"]["matcher"]["options"] for s in curve["options"]["series"]], cpu_series)
+            self.assertEqual([s["name"]["fixed"] for s in curve["options"]["series"]], cpu_series)
             self.assertIn("aggregateWindow(every: 1m", curve["targets"][0]["query"])
             self.assertIn('pivot(rowKey: ["_time"], columnKey: ["_field"]', curve["targets"][0]["query"])
             for title in ("Packet Rate and Connection Rate", "Sessions and Session Table", "Drops and Interface Errors"):
                 self.assertEqual(panels[title]["type"], "timeseries", title)
             self.assertTrue(load_test["collapsed"])
+
+    def test_kpi_strip_shows_all_core_and_active_core_dataplane_cpu(self):
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            strip = sorted(
+                (panel for panel in dashboard["panels"] if panel["type"] == "stat" and panel["gridPos"]["y"] == 4),
+                key=lambda panel: panel["gridPos"]["x"],
+            )
+            self.assertEqual([panel["title"] for panel in strip[:3]], ["DP CPU (avg)", "DP CPU (active cores)", "Hottest DP Core"])
+            # The tiles fill the 24-column row edge to edge without gaps.
+            edges = [(panel["gridPos"]["x"], panel["gridPos"]["x"] + panel["gridPos"]["w"]) for panel in strip]
+            self.assertEqual(edges[0][0], 0)
+            self.assertEqual(edges[-1][1], 24)
+            self.assertTrue(all(end == start for (_, end), (start, _) in zip(edges, edges[1:])))
+            query = strip[1]["targets"][0]["query"]
+            self.assertIn('r._field == "cpu_active_pct"', query)
+            self.assertIn('r.core == "average"', query)
 
     def test_panel_ids_are_unique_and_rows_are_ordered(self):
         for dashboard in (self.dashboard, self.chassis_dashboard):

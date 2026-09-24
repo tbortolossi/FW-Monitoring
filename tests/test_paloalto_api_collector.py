@@ -167,7 +167,10 @@ class CollectorParsingTests(unittest.TestCase):
         indexed = {(tags["dataplane"], tags["core"]): fields for tags, fields in parse_dataplane_resources(result)}
         # The maximum is stored separately and never mixed into cpu_pct.
         self.assertEqual(indexed[("dp0", "0")], {"cpu_pct": 12.0, "cpu_max_pct": 99.0})
-        self.assertEqual(indexed[("dp0", "average")], {"cpu_pct": 12.0, "cpu_max_pct": 99.0})
+        self.assertEqual(
+            indexed[("dp0", "average")],
+            {"cpu_pct": 12.0, "cpu_active_pct": 12.0, "active_cores": 1, "cpu_max_pct": 99.0},
+        )
 
     def test_dataplane_average_point_uses_mean_of_averages_and_max_of_maxima(self):
         result = ET.fromstring(
@@ -180,9 +183,48 @@ class CollectorParsingTests(unittest.TestCase):
         )
         indexed = {(tags["dataplane"], tags["core"]): fields for tags, fields in parse_dataplane_resources(result)}
         self.assertEqual(indexed[("s1dp0", "1")], {"cpu_pct": 30.0, "cpu_max_pct": 80.0})
-        self.assertEqual(indexed[("s1dp0", "average")], {"cpu_pct": 20.0, "cpu_max_pct": 80.0})
+        self.assertEqual(
+            indexed[("s1dp0", "average")],
+            {"cpu_pct": 20.0, "cpu_active_pct": 20.0, "active_cores": 2, "cpu_max_pct": 80.0},
+        )
         line = line_protocol("m", {}, indexed[("s1dp0", "average")])
-        self.assertEqual(line, "m cpu_max_pct=80.0,cpu_pct=20.0")
+        self.assertEqual(line, "m active_cores=2i,cpu_active_pct=20.0,cpu_max_pct=80.0,cpu_pct=20.0")
+
+    def test_dataplane_active_core_average_skips_cores_that_never_ran(self):
+        # PA-5580 dataplane under load: core 0 and cores 81-127 stay at 0% (not
+        # pan task cores), cores 1-80 process packets at about 72%.
+        averages = "".join(
+            f"<entry><coreid>{core}</coreid><value>{72 if 1 <= core <= 80 else 0}</value></entry>" for core in range(128)
+        )
+        maxima = "".join(
+            f"<entry><coreid>{core}</coreid><value>{85 if 1 <= core <= 80 else 0}</value></entry>" for core in range(128)
+        )
+        result = ET.fromstring(
+            "<result><data-processors><s1dp0><minute>"
+            f"<cpu-load-average>{averages}</cpu-load-average><cpu-load-maximum>{maxima}</cpu-load-maximum>"
+            "</minute></s1dp0></data-processors></result>"
+        )
+        indexed = {(tags["dataplane"], tags["core"]): fields for tags, fields in parse_dataplane_resources(result)}
+        summary = indexed[("s1dp0", "average")]
+        self.assertEqual(summary["cpu_pct"], 72 * 80 / 128)
+        self.assertEqual(summary["cpu_active_pct"], 72.0)
+        self.assertEqual(summary["active_cores"], 80)
+
+    def test_dataplane_active_core_average_without_maximum_or_load(self):
+        # Without a maximum table the per-core average decides; an idle
+        # dataplane reports 0.0 rather than no value.
+        result = ET.fromstring(
+            "<result><data-processors><dp0><second><cpu-load-average>"
+            "<entry><coreid>0</coreid><value>0</value></entry>"
+            "<entry><coreid>1</coreid><value>40</value></entry>"
+            "</cpu-load-average></second></dp0><dp1><second><cpu-load-average>"
+            "<entry><coreid>0</coreid><value>0</value></entry>"
+            "</cpu-load-average></second></dp1></data-processors></result>"
+        )
+        indexed = {(tags["dataplane"], tags["core"]): fields for tags, fields in parse_dataplane_resources(result)}
+        self.assertEqual(indexed[("dp0", "average")]["cpu_active_pct"], 40.0)
+        self.assertEqual(indexed[("dp1", "average")]["cpu_active_pct"], 0.0)
+        self.assertEqual(indexed[("dp1", "average")]["active_cores"], 0)
 
     def test_dataplane_command_reads_last_minute(self):
         self.assertIn("<minute><last>1</last></minute>", DATAPLANE_COMMAND)
