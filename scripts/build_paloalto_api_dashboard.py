@@ -451,6 +451,62 @@ from(bucket: "firewalls")
     ]
 
 
+# Share of the received traffic that bypasses the dataplane. The port counters
+# see every frame; the dataplane ibytes (dp_in_octets) miss hardware-offloaded
+# flows, so the difference estimates the offloaded traffic. Small platforms
+# refresh the port counters late and in bursts: a burst first reads as a
+# negative difference, then as an equal positive one in the next window, while
+# real offload stays positive. The estimate is therefore the smaller of the
+# current and previous window differences (delta - max(delta - previous, 0)),
+# over windows of at least 2 minutes and floored at 5% of the total, which
+# keeps a firewall without offload at zero.
+OFFLOAD_WINDOW = "2m"
+OFFLOAD_FLOOR = 0.05
+
+
+def offload_panel() -> dict:
+    panel = stacked(timeseries(3014, "Throughput Received: Dataplane vs Offloaded", f'''
+window = if int(v: v.windowPeriod) > int(v: {OFFLOAD_WINDOW}) then v.windowPeriod else {OFFLOAD_WINDOW}
+from(bucket: "firewalls")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "paloalto_api_interfaces" and r.hostname == "${{hostname}}" and {PHYSICAL} and (r._field == "in_octets" or r._field == "dp_in_octets"))
+  |> derivative(unit: 1s, nonNegative: true)
+  |> aggregateWindow(every: window, fn: mean, createEmpty: false)
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> filter(fn: (r) => exists r.in_octets and exists r.dp_in_octets)
+  |> group(columns: ["_time"])
+  |> reduce(identity: {{total: 0.0, dataplane: 0.0}}, fn: (r, accumulator) => ({{ total: accumulator.total + r.in_octets * 8.0, dataplane: accumulator.dataplane + r.dp_in_octets * 8.0 }}))
+  |> group()
+  |> sort(columns: ["_time"])
+  |> map(fn: (r) => ({{ r with delta: r.total - r.dataplane, _value: r.total - r.dataplane }}))
+  |> difference(columns: ["_value"], keepFirst: true)
+  |> map(fn: (r) => {{
+    offload = if exists r._value then r.delta - (if r._value > 0.0 then r._value else 0.0) else 0.0
+    return {{
+      _time: r._time,
+      "Dataplane": r.dataplane,
+      "Offloaded (estimate)": if offload > r.total * {OFFLOAD_FLOOR} then offload else 0.0,
+      "Total": r.total,
+    }}
+  }})
+''', 0, 35, 24, 9, "bps", (
+        "Traffic received on the physical Ethernet ports, split between what the dataplane counted (ibytes of show "
+        "counter interface all) and the rest, which is mostly hardware-offloaded flows. Offloaded = port counter "
+        "(port/rx-bytes) minus dataplane counter. It is an estimate: it also contains frames dropped before the "
+        "dataplane and framing overhead. Some platforms refresh the port counters late and in bursts, so it is averaged "
+        "over at least 2 minutes, only counted when the previous window shows it too, and set to 0 below 5% of the "
+        "total. The Total line is not stacked. "
+        "No data means the firewall does not return the MAC-level port counters."
+    )))
+    panel["fieldConfig"]["overrides"] = [
+        override("Total", custom__stacking={"mode": "none", "group": "A"}, custom__fillOpacity=0, custom__lineWidth=2,
+                 color={"mode": "fixed", "fixedColor": "text"}),
+        override("Dataplane", color={"mode": "fixed", "fixedColor": "blue"}),
+        override("Offloaded (estimate)", color={"mode": "fixed", "fixedColor": "orange"}),
+    ]
+    return panel
+
+
 def overview_panels() -> list[dict]:
     interface_load = table(3010, "Interface Load (last 5 minutes)", f'''
 speed = from(bucket: "firewalls")
@@ -572,6 +628,7 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
 ''', 0, 25, 14, 10, "bps", "Total throughput of the physical Ethernet ports, calculated from the MAC-level port octet counters of show counter interface all. These include hardware-offloaded flows, which the dataplane ibytes/obytes counters and the session throughput summary miss."),
         interface_load,
+        offload_panel(),
         guide_lines(percent_range(timeseries(3011, "Dataplane Resource Pressure", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -580,7 +637,7 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 0, 35, 8, 8, "percent", "Worst dataplane for each resource-monitor resource: session table, packet buffers, packet descriptors and software tags. Buffer or descriptor pressure precedes packet drops."))),
+''', 0, 44, 8, 8, "percent", "Worst dataplane for each resource-monitor resource: session table, packet buffers, packet descriptors and software tags. Buffer or descriptor pressure precedes packet drops."))),
         guide_lines(percent_range(timeseries(3013, "Ingress Backlog by Dataplane", '''
 from(bucket: "firewalls")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
@@ -589,7 +646,7 @@ from(bucket: "firewalls")
   |> group(columns: ["_field"])
   |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)
   |> keep(columns: ["_time", "_field", "_value"])
-''', 8, 35, 8, 8, "percent", "Packet-processing ingress queue usage per dataplane from show running resource-monitor ingress-backlogs. 0% means no backlog; a sustained backlog means the dataplane cannot keep up and precedes buffer exhaustion and drops. Dashed lines mark 50% and 80%.")),
+''', 8, 44, 8, 8, "percent", "Packet-processing ingress queue usage per dataplane from show running resource-monitor ingress-backlogs. 0% means no backlog; a sustained backlog means the dataplane cannot keep up and precedes buffer exhaustion and drops. Dashed lines mark 50% and 80%.")),
             thresholds(("green", None), ("#EAB839", 50), ("red", 80))),
         stacked(timeseries(3012, "Global Drop Rate by Category", '''
 from(bucket: "firewalls")
@@ -601,7 +658,7 @@ from(bucket: "firewalls")
   |> group(columns: ["_time", "_field"])
   |> sum()
   |> group(columns: ["_field"])
-''', 16, 35, 8, 8, "pps", "Packets dropped per second by the dataplane, stacked by PAN-OS counter category so the total drop rate is the top of the stack. Details are in the drop counter sections.")),
+''', 16, 44, 8, 8, "pps", "Packets dropped per second by the dataplane, stacked by PAN-OS counter category so the total drop rate is the top of the stack. Details are in the drop counter sections.")),
     ]
 
 
