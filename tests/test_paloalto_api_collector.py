@@ -344,12 +344,25 @@ class CollectorParsingTests(unittest.TestCase):
         self.assertEqual(tags, {"interface": "ethernet1/11"})
         self.assertEqual(fields["in_octets"], 34276928149555)
         self.assertEqual(fields["out_octets"], 26526647391272)
+        # The dataplane counters stay available to estimate the offloaded share.
+        self.assertEqual(fields["dp_in_octets"], 13923248051098)
+        self.assertEqual(fields["dp_out_octets"], 23137800987779)
         self.assertEqual(fields["in_packets"], 91353449553 + 95833 + 16)
         self.assertEqual(fields["out_packets"], 39630544405 + 10598 + 49)
         self.assertEqual(fields["in_errors"], 0)
         self.assertEqual(fields["in_discards"], 0)
         self.assertEqual(fields["out_errors"], 0)
         self.assertEqual(fields["link_down_count"], 0)
+
+    def test_dataplane_octets_need_the_port_counter_of_the_same_direction(self):
+        result = ET.fromstring(
+            "<result><hw><entry><name>ethernet1/1</name><ibytes>10</ibytes>"
+            "<obytes>20</obytes><port><rx-bytes>30</rx-bytes></port></entry></hw></result>"
+        )
+        self.assertEqual(
+            parse_interface_counters(result),
+            [({"interface": "ethernet1/1"}, {"in_octets": 30, "dp_in_octets": 10, "out_octets": 20})],
+        )
 
     def test_partial_port_frame_counters_keep_dataplane_packets(self):
         result = ET.fromstring(

@@ -1402,6 +1402,127 @@
       },
       "fieldConfig": {
         "defaults": {
+          "unit": "bps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 25,
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none",
+                  "group": "A"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Dataplane"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Offloaded (estimate)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "id": 13014,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "P951FEA4DE68E13C5"
+          },
+          "query": "window = if int(v: v.windowPeriod) > int(v: 2m) then v.windowPeriod else 2m\nfrom(bucket: \"firewalls\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"paloalto_api_interfaces\" and r.hostname == \"${hostname}\" and exists r.interface and r.interface =~ /(?i)^ethernet/ and r.interface !~ /\\./ and (r._field == \"in_octets\" or r._field == \"dp_in_octets\"))\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: window, fn: mean, createEmpty: false)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> filter(fn: (r) => exists r.in_octets and exists r.dp_in_octets)\n  |> group(columns: [\"_time\"])\n  |> reduce(identity: {total: 0.0, dataplane: 0.0}, fn: (r, accumulator) => ({ total: accumulator.total + r.in_octets * 8.0, dataplane: accumulator.dataplane + r.dp_in_octets * 8.0 }))\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> map(fn: (r) => ({ r with delta: r.total - r.dataplane, _value: r.total - r.dataplane }))\n  |> difference(columns: [\"_value\"], keepFirst: true)\n  |> map(fn: (r) => {\n    offload = if exists r._value then r.delta - (if r._value > 0.0 then r._value else 0.0) else 0.0\n    return {\n      _time: r._time,\n      \"Dataplane\": r.dataplane,\n      \"Offloaded (estimate)\": if offload > r.total * 0.05 then offload else 0.0,\n      \"Total\": r.total,\n    }\n  })",
+          "refId": "A"
+        }
+      ],
+      "title": "Throughput Received: Dataplane vs Offloaded",
+      "type": "timeseries",
+      "description": "Traffic received on the physical Ethernet ports, split between what the dataplane counted (ibytes of show counter interface all) and the rest, which is mostly hardware-offloaded flows. Offloaded = port counter (port/rx-bytes) minus dataplane counter. It is an estimate: it also contains frames dropped before the dataplane and framing overhead. Some platforms refresh the port counters late and in bursts, so it is averaged over at least 2 minutes, only counted when the previous window shows it too, and set to 0 below 5% of the total. The Total line is not stacked. No data means the firewall does not return the MAC-level port counters.\n\nSource: `show counter interface all` via the PAN-OS XML API, polled every 20 s by default."
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "P951FEA4DE68E13C5"
+      },
+      "fieldConfig": {
+        "defaults": {
           "unit": "percent",
           "custom": {
             "drawStyle": "line",
@@ -1440,7 +1561,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 44
+        "y": 53
       },
       "id": 13011,
       "options": {
@@ -1518,7 +1639,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 44
+        "y": 53
       },
       "id": 13013,
       "options": {
@@ -1578,7 +1699,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 44
+        "y": 53
       },
       "id": 13012,
       "options": {
@@ -2091,7 +2212,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 52
+        "y": 61
       },
       "id": 9201,
       "panels": [
@@ -2115,7 +2236,7 @@
             "h": 11,
             "w": 12,
             "x": 0,
-            "y": 53
+            "y": 62
           },
           "id": 2010,
           "options": {
@@ -2159,7 +2280,7 @@
             "h": 11,
             "w": 12,
             "x": 12,
-            "y": 53
+            "y": 62
           },
           "id": 2024,
           "options": {
@@ -2266,7 +2387,7 @@
             "h": 6,
             "w": 24,
             "x": 0,
-            "y": 64
+            "y": 73
           },
           "id": 2040,
           "options": {
@@ -2300,7 +2421,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 53
+        "y": 62
       },
       "id": 9202,
       "panels": [
@@ -2327,7 +2448,7 @@
             "h": 10,
             "w": 14,
             "x": 0,
-            "y": 54
+            "y": 63
           },
           "id": 2011,
           "options": {
@@ -2380,7 +2501,7 @@
             "h": 10,
             "w": 10,
             "x": 14,
-            "y": 54
+            "y": 63
           },
           "id": 2012,
           "options": {
@@ -2427,7 +2548,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 64
+            "y": 73
           },
           "id": 2025,
           "options": {
@@ -2470,7 +2591,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 63
       },
       "id": 9204,
       "panels": [
@@ -2497,7 +2618,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 55
+            "y": 64
           },
           "id": 2015,
           "options": {
@@ -2553,7 +2674,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 55
+            "y": 64
           },
           "id": 2016,
           "options": {
@@ -2609,7 +2730,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 65
+            "y": 74
           },
           "id": 2017,
           "options": {
@@ -2662,7 +2783,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 65
+            "y": 74
           },
           "id": 2018,
           "options": {
@@ -2696,7 +2817,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 64
       },
       "id": 9205,
       "panels": [
@@ -2723,7 +2844,7 @@
             "h": 11,
             "w": 24,
             "x": 0,
-            "y": 56
+            "y": 65
           },
           "id": 2019,
           "options": {
@@ -2766,7 +2887,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 65
       },
       "id": 19013,
       "panels": [
@@ -2798,7 +2919,7 @@
             "h": 4,
             "w": 3,
             "x": 0,
-            "y": 57
+            "y": 66
           },
           "id": 13601,
           "options": {
@@ -2858,7 +2979,7 @@
             "h": 4,
             "w": 3,
             "x": 3,
-            "y": 57
+            "y": 66
           },
           "id": 13602,
           "options": {
@@ -2918,7 +3039,7 @@
             "h": 4,
             "w": 3,
             "x": 6,
-            "y": 57
+            "y": 66
           },
           "id": 13603,
           "options": {
@@ -2978,7 +3099,7 @@
             "h": 4,
             "w": 3,
             "x": 9,
-            "y": 57
+            "y": 66
           },
           "id": 13604,
           "options": {
@@ -3038,7 +3159,7 @@
             "h": 4,
             "w": 3,
             "x": 12,
-            "y": 57
+            "y": 66
           },
           "id": 13605,
           "options": {
@@ -3107,7 +3228,7 @@
             "h": 4,
             "w": 3,
             "x": 15,
-            "y": 57
+            "y": 66
           },
           "id": 13606,
           "options": {
@@ -3176,7 +3297,7 @@
             "h": 4,
             "w": 3,
             "x": 18,
-            "y": 57
+            "y": 66
           },
           "id": 13607,
           "options": {
@@ -3240,7 +3361,7 @@
             "h": 4,
             "w": 3,
             "x": 21,
-            "y": 57
+            "y": 66
           },
           "id": 13608,
           "options": {
@@ -3328,7 +3449,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 61
+            "y": 70
           },
           "id": 13611,
           "options": {
@@ -3487,7 +3608,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 71
+            "y": 80
           },
           "id": 13612,
           "options": {
@@ -3637,7 +3758,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 71
+            "y": 80
           },
           "id": 13613,
           "options": {
@@ -3726,7 +3847,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 81
+            "y": 90
           },
           "id": 13614,
           "options": {
@@ -3782,7 +3903,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 81
+            "y": 90
           },
           "id": 13615,
           "options": {
@@ -3825,7 +3946,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 66
       },
       "id": 19006,
       "panels": [
@@ -3892,7 +4013,7 @@
             "h": 6,
             "w": 24,
             "x": 0,
-            "y": 58
+            "y": 67
           },
           "id": 11006,
           "options": {
@@ -4023,7 +4144,7 @@
             "h": 4,
             "w": 24,
             "x": 0,
-            "y": 64
+            "y": 73
           },
           "id": 11007,
           "options": {
@@ -4176,7 +4297,7 @@
             "h": 4,
             "w": 24,
             "x": 0,
-            "y": 68
+            "y": 77
           },
           "id": 11008,
           "options": {
@@ -4210,7 +4331,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 58
+        "y": 67
       },
       "id": 19001,
       "panels": [
@@ -4237,7 +4358,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 59
+            "y": 68
           },
           "id": 10008,
           "options": {
@@ -4283,7 +4404,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 68
       },
       "id": 19008,
       "panels": [
@@ -4310,7 +4431,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 60
+            "y": 69
           },
           "id": 10009,
           "options": {
@@ -4363,7 +4484,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 60
+            "y": 69
           },
           "id": 10010,
           "options": {
@@ -4397,7 +4518,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 69
       },
       "id": 19004,
       "panels": [
@@ -4424,7 +4545,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 61
+            "y": 70
           },
           "id": 10011,
           "options": {
@@ -4470,7 +4591,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 61
+        "y": 70
       },
       "id": 19009,
       "panels": [
@@ -4497,7 +4618,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 62
+            "y": 71
           },
           "id": 13101,
           "options": {
@@ -4556,7 +4677,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 70
+            "y": 79
           },
           "id": 13103,
           "options": {
@@ -4615,7 +4736,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 78
+            "y": 87
           },
           "id": 13102,
           "options": {
@@ -4661,7 +4782,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 62
+        "y": 71
       },
       "id": 19010,
       "panels": [
@@ -4688,7 +4809,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 63
+            "y": 72
           },
           "id": 13111,
           "options": {
@@ -4744,7 +4865,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 63
+            "y": 72
           },
           "id": 13114,
           "options": {
@@ -4800,7 +4921,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 73
+            "y": 82
           },
           "id": 13113,
           "options": {
@@ -4853,7 +4974,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 83
+            "y": 92
           },
           "id": 13115,
           "options": {
@@ -4887,7 +5008,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 72
       },
       "id": 19002,
       "panels": [
@@ -4936,7 +5057,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 64
+            "y": 73
           },
           "id": 13201,
           "options": {
@@ -4997,7 +5118,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 73
+            "y": 82
           },
           "id": 13202,
           "options": {
@@ -5073,7 +5194,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 83
+            "y": 92
           },
           "id": 10012,
           "options": {
@@ -5134,7 +5255,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 93
+            "y": 102
           },
           "id": 10013,
           "options": {
@@ -5180,7 +5301,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 64
+        "y": 73
       },
       "id": 19007,
       "panels": [
@@ -5207,7 +5328,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 65
+            "y": 74
           },
           "id": 10014,
           "options": {
@@ -5263,7 +5384,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 65
+            "y": 74
           },
           "id": 10015,
           "options": {
@@ -5306,7 +5427,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 74
       },
       "id": 19003,
       "panels": [
@@ -5333,7 +5454,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 66
+            "y": 75
           },
           "id": 13301,
           "options": {
@@ -5389,7 +5510,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 66
+            "y": 75
           },
           "id": 13302,
           "options": {
@@ -5445,7 +5566,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 75
+            "y": 84
           },
           "id": 13303,
           "options": {
@@ -5501,7 +5622,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 75
+            "y": 84
           },
           "id": 13304,
           "options": {
@@ -5557,7 +5678,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 84
+            "y": 93
           },
           "id": 13305,
           "options": {
@@ -5600,7 +5721,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 75
       },
       "id": 19011,
       "panels": [
@@ -5627,7 +5748,7 @@
             "h": 12,
             "w": 24,
             "x": 0,
-            "y": 67
+            "y": 76
           },
           "id": 10016,
           "options": {
@@ -5680,7 +5801,7 @@
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 79
+            "y": 88
           },
           "id": 13311,
           "options": {
@@ -5714,7 +5835,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 67
+        "y": 76
       },
       "id": 19012,
       "panels": [
@@ -5742,7 +5863,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 68
+            "y": 77
           },
           "id": 13501,
           "options": {
@@ -5799,7 +5920,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 68
+            "y": 77
           },
           "id": 13502,
           "options": {
@@ -5949,7 +6070,7 @@
             "h": 4,
             "w": 24,
             "x": 0,
-            "y": 77
+            "y": 86
           },
           "id": 13503,
           "options": {
@@ -6005,7 +6126,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 81
+            "y": 90
           },
           "id": 13504,
           "options": {
@@ -6095,7 +6216,7 @@
             "h": 8,
             "w": 20,
             "x": 4,
-            "y": 81
+            "y": 90
           },
           "id": 13505,
           "options": {
@@ -6147,7 +6268,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 85
+            "y": 94
           },
           "id": 13506,
           "options": {
@@ -6202,7 +6323,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 89
+            "y": 98
           },
           "id": 13507,
           "options": {
@@ -6245,7 +6366,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 77
       },
       "id": 19005,
       "panels": [
@@ -6272,7 +6393,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 69
+            "y": 78
           },
           "id": 10017,
           "options": {
@@ -6328,7 +6449,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 69
+            "y": 78
           },
           "id": 10018,
           "options": {
@@ -6386,7 +6507,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 79
+            "y": 88
           },
           "id": 10019,
           "options": {
@@ -6546,7 +6667,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 79
+            "y": 88
           },
           "id": 13401,
           "options": {
@@ -6595,7 +6716,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 89
+            "y": 98
           },
           "id": 10022,
           "options": {
@@ -6651,7 +6772,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 89
+            "y": 98
           },
           "id": 10023,
           "options": {

@@ -627,9 +627,14 @@ def parse_interface_counters(result: ET.Element) -> list[tuple[dict, dict]]:
         # ibytes/obytes and ipackets/opackets are maintained by the dataplane and
         # miss hardware-offloaded flows; the MAC-level port counters see every
         # frame on the wire, like SNMP ifHCInOctets. Prefer them when present.
+        # The dataplane octets are kept as dp_*_octets only next to a port
+        # counter, so the dashboard can estimate the offloaded share as
+        # port minus dataplane without mistaking the fallback for zero offload.
         for direction, octets, packets in (("rx", "in_octets", "in_packets"), ("tx", "out_octets", "out_packets")):
             value = _number(entry.findtext(f"port/{direction}-bytes"))
             if value is not None:
+                if octets in fields:
+                    fields[f"dp_{octets}"] = fields[octets]
                 fields[octets] = value
             frames = [
                 _number(entry.findtext(f"port/{direction}-{kind}"))

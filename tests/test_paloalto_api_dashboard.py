@@ -55,6 +55,28 @@ class PaloAltoApiDashboardTests(unittest.TestCase):
             self.assertEqual(panel["repeatDirection"], "h")
             self.assertEqual(panel["gridPos"]["w"], 24)
 
+    def test_offload_estimate_compares_port_and_dataplane_counters(self):
+        for dashboard in (self.dashboard, self.chassis_dashboard):
+            panel = next(
+                panel for panel in dashboard["panels"]
+                if panel["title"] == "Throughput Received: Dataplane vs Offloaded"
+            )
+            query = panel["targets"][0]["query"]
+            # Both counters of the same physical ports, and only ports that
+            # report both, so a missing port block never reads as zero offload.
+            self.assertIn('r._field == "dp_in_octets"', query)
+            self.assertIn("exists r.in_octets and exists r.dp_in_octets", query)
+            # Burst-refreshed port counters are smoothed over at least 2 minutes
+            # and small differences are floored to zero.
+            self.assertIn("int(v: v.windowPeriod) > int(v: 2m)", query)
+            self.assertIn("r.total * 0.05", query)
+            # A late port-counter refresh reads negative then positive; the
+            # smaller of two consecutive windows drops it, steady offload stays.
+            self.assertIn('difference(columns: ["_value"], keepFirst: true)', query)
+            self.assertEqual(panel["fieldConfig"]["defaults"]["custom"]["stacking"]["mode"], "normal")
+            total = next(item for item in panel["fieldConfig"]["overrides"] if item["matcher"]["options"] == "Total")
+            self.assertIn({"id": "custom.stacking", "value": {"mode": "none", "group": "A"}}, total["properties"])
+
     def test_active_physical_interfaces_get_repeated_api_panels(self):
         rows = {
             panel["title"]: panel
