@@ -13,7 +13,7 @@ RUN echo "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] \
     rm -f /var/lib/mibs/ietf/SNMPv2-PDU && \
     rm -rf /var/lib/apt/lists/*
 
-FROM telegraf:1.40.1-alpine
+FROM telegraf:1.40.2-alpine
 
 USER root
 
