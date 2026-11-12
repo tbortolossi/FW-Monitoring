@@ -39,10 +39,10 @@ The image scan always reports every HIGH and CRITICAL finding. It blocks release
 
 ## Temporary Risk Acceptance
 
-`CVE-2026-84445` in the gRPC-Go library embedded in Telegraf 1.40.1 is temporarily accepted until 2026-10-31 because:
+`CVE-2026-78661` in the `golang.org/x/net/html` parser embedded in Telegraf 1.40.3 is temporarily accepted until 2026-11-30 because:
 
-- Telegraf 1.40.1 is the latest stable upstream release at the time of review;
-- this stack enables SNMP and `execd` inputs and does not configure a gRPC listener, so the vulnerable request path is not reachable through the shipped configuration;
+- Telegraf 1.40.3 is the latest stable upstream release at the time of review;
+- this stack enables SNMP and `execd` inputs, which parse no HTML, so the vulnerable code path is not reachable through the shipped configuration;
 - the exception is restricted to `/usr/bin/telegraf` and expires automatically.
 
 The exception must be removed immediately when a stable upstream Telegraf image includes the fixed dependency. Expiry must not be extended without a new review.

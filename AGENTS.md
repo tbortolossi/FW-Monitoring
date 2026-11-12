@@ -33,7 +33,7 @@ Keep changes aligned with that goal: simple install, clear configuration, reliab
 - `telegraf/inputs_paloalto.tmpl`, `telegraf/inputs_fortinet.tmpl`: plain Jinja2 SNMP input templates (two instances per firewall, see below).
 - `telegraf/inputs_paloalto_api.tmpl`: `inputs.execd` block for the API collector.
 - `telegraf/paloalto_api_collector.py`: standard-library PAN-OS XML API collector (line protocol on stdout).
-- `telegraf/Dockerfile`: custom Alpine Telegraf 1.40.1 image with Net-SNMP, standard and vendor MIBs, and the collector; keeps UID `999`.
+- `telegraf/Dockerfile`: custom Alpine Telegraf 1.40.3 image with Net-SNMP, standard and vendor MIBs, and the collector; keeps UID `999`.
 - `telegraf/mibs/`: bundled vendor MIBs.
 - `grafana/provisioning/`: Grafana datasources and dashboards.
 - `scripts/build_paloalto_api_dashboard.py`: generates `Palo_API_Dashboard.json` and `Palo_API_Chassis_Dashboard.json`. Never hand-edit those two JSON files; edit the script and regenerate (CI checks for drift). Its panel factories (`timeseries`, `peak`, `xychart`, `right_axis`, ...) were also used to build the collapsed **Load Test** row of the three SNMP dashboards; keep the five sections structurally aligned (`test_every_dashboard_has_a_load_test_section`).

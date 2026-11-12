@@ -1,47 +1,12 @@
 vulnerabilities:
-  - id: CVE-2026-84445
+  - id: CVE-2026-78661
     paths:
       - usr/bin/telegraf
-    expired_at: 2026-10-31
+    expired_at: 2026-11-30
     statement: >-
-      Telegraf 1.40.1 is the latest stable upstream release. The vulnerable
-      gRPC-Go code is embedded in the binary, but this stack enables only SNMP
-      and execd inputs and exposes no gRPC listener. Remove this exception as
-      soon as an upstream Telegraf image containing the fixed gRPC-Go release
-      is available.
-  - id: CVE-2026-78667
-    paths:
-      - usr/bin/telegraf
-    expired_at: 2026-10-31
-    statement: >-
-      Telegraf 1.40.1 is the latest stable upstream release and is built with
-      Go 1.27.1 and golang.org/x/net 0.59.0. This denial-of-service flaw
-      affects net/http, HTTP/2 or crypto/tls ECH handling, but this stack
-      enables only SNMP and execd inputs, exposes no Telegraf listener, and
-      reaches InfluxDB over plaintext HTTP/1.1 on the internal Compose
-      network. Remove this exception as soon as an upstream Telegraf image
-      built with Go 1.27.2 and golang.org/x/net 0.60.0 is available.
-  - id: CVE-2026-78669
-    paths:
-      - usr/bin/telegraf
-    expired_at: 2026-10-31
-    statement: >-
-      Telegraf 1.40.1 is the latest stable upstream release and is built with
-      Go 1.27.1 and golang.org/x/net 0.59.0. This denial-of-service flaw
-      affects net/http, HTTP/2 or crypto/tls ECH handling, but this stack
-      enables only SNMP and execd inputs, exposes no Telegraf listener, and
-      reaches InfluxDB over plaintext HTTP/1.1 on the internal Compose
-      network. Remove this exception as soon as an upstream Telegraf image
-      built with Go 1.27.2 and golang.org/x/net 0.60.0 is available.
-  - id: CVE-2026-97031
-    paths:
-      - usr/bin/telegraf
-    expired_at: 2026-10-31
-    statement: >-
-      Telegraf 1.40.1 is the latest stable upstream release and is built with
-      Go 1.27.1 and golang.org/x/net 0.59.0. This denial-of-service flaw
-      affects net/http, HTTP/2 or crypto/tls ECH handling, but this stack
-      enables only SNMP and execd inputs, exposes no Telegraf listener, and
-      reaches InfluxDB over plaintext HTTP/1.1 on the internal Compose
-      network. Remove this exception as soon as an upstream Telegraf image
-      built with Go 1.27.2 and golang.org/x/net 0.60.0 is available.
+      Telegraf 1.40.3 is the latest stable upstream release and embeds
+      golang.org/x/net 0.61.0. This denial-of-service flaw is in the
+      golang.org/x/net/html parser, but this stack enables only SNMP and
+      execd inputs, which parse no HTML. Remove this exception as soon as an
+      upstream Telegraf image built with golang.org/x/net 0.62.0 is
+      available.
