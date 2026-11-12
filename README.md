@@ -12,7 +12,7 @@ The standard Palo Alto and Fortinet dashboards calculate throughput from IF-MIB 
 
 - InfluxDB 2.7 for time series storage, published on `127.0.0.1:8086` only
 - Grafana 13.2.2 with a provisioned InfluxDB (Flux) datasource
-- A custom Telegraf 1.40.1 (Alpine) image with Net-SNMP, the standard and vendor MIBs, and the Palo Alto API collector
+- A custom Telegraf 1.40.3 (Alpine) image with Net-SNMP, the standard and vendor MIBs, and the Palo Alto API collector
 - Telegraf SNMP polling generated from `firewalls.yml`, split into a 20-second instance for load data and a 60-second instance for slow-moving tables
 - Optional Palo Alto XML API polling for sessions, management-plane resources, per-core dataplane CPU, ingress backlogs, interface state and throughput, HA, storage, environmental sensors, logging and management health, and selected drop counters
 - Five provisioned dashboards:
@@ -260,7 +260,7 @@ For a live demonstration, pick a short time range such as **Last 15 minutes** wi
 - `requirements.txt` contains the Python dependencies: `PyYAML` and `Jinja2`.
 - `requirements-dev.txt` adds the coverage and dependency-audit tools used by CI.
 
-The custom Telegraf runtime uses the official `telegraf:1.40.1-alpine` image. A build-only Debian stage downloads the standard IANA/IETF MIB corpus required for ENTITY-based chassis monitoring; Debian packages are not copied into the final image. The runtime preserves Telegraf UID `999` so log directories created by earlier Debian-based releases remain writable during an in-place upgrade. The image supports `amd64` and `arm64`; the upstream Alpine image does not publish an `arm/v7` variant.
+The custom Telegraf runtime uses the official `telegraf:1.40.3-alpine` image. A build-only Debian stage downloads the standard IANA/IETF MIB corpus required for ENTITY-based chassis monitoring; Debian packages are not copied into the final image. The runtime preserves Telegraf UID `999` so log directories created by earlier Debian-based releases remain writable during an in-place upgrade. The image supports `amd64` and `arm64`; the upstream Alpine image does not publish an `arm/v7` variant.
 
 On each run, the generator:
 
@@ -853,7 +853,7 @@ This section is for installations still running v1.0.2 (tag `v1.0.2`, up to comm
 | Area | v1.0.2 | Now |
 | --- | --- | --- |
 | Palo Alto XML API | not available | optional, per firewall (`api_monitoring`) |
-| Telegraf image | Debian-based Telegraf 1.32 | Alpine-based Telegraf 1.40.1, same UID `999` |
+| Telegraf image | Debian-based Telegraf 1.32 | Alpine-based Telegraf 1.40.3, same UID `999` |
 | SNMP secrets | clear text in `firewalls.yml`, `.firewalls.generated.yml`, and `telegraf.conf` | `${VARIABLE}` references to `.env` supported; `telegraf.conf` holds only `$FIREWALL_SNMP_*` references; generated inventory is redacted |
 | `.env` | InfluxDB and Grafana only | also firewall secrets and API keys (optional) |
 | Grafana | 11.1.4 | 13.2.2 |
@@ -869,7 +869,7 @@ The upgrade keeps your inventory, history, and Grafana users. Plan a few minutes
 docker compose version    # must be v2.24.0 or later
 ```
 
-Older Compose plugins reject the optional `env_file` entry used by the Telegraf service; update the `docker-compose-plugin` package first. The host needs outbound HTTPS to pull `grafana/grafana:13.2.2`, `telegraf:1.40.1-alpine`, and `debian:bookworm-slim`.
+Older Compose plugins reject the optional `env_file` entry used by the Telegraf service; update the `docker-compose-plugin` package first. The host needs outbound HTTPS to pull `grafana/grafana:13.2.2`, `telegraf:1.40.3-alpine`, and `debian:bookworm-slim`.
 
 ### 2. Back Up
 
@@ -994,7 +994,7 @@ During this run the generator:
 
 ```bash
 docker compose ps                                  # three services, influxdb and grafana "healthy"
-docker compose images                              # grafana 13.2.2, telegraf built from 1.40.1-alpine
+docker compose images                              # grafana 13.2.2, telegraf built from 1.40.3-alpine
 grep -c 'FIREWALL_SNMP_' telegraf/telegraf.conf    # > 0: SNMP secrets are referenced, not written
 ls -l telegraf/paloalto-api.env .firewalls.generated.yml   # both -rw-------
 tail -50 logs/telegraf/telegraf.log                # no SNMP timeouts or authentication errors
