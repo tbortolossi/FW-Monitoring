@@ -273,7 +273,7 @@ class VendorAndImageTests(TempProjectMixin, unittest.TestCase):
         self.assertIs(kwargs["stdout"], subprocess.PIPE)
         self.assertIs(kwargs["stderr"], subprocess.STDOUT)
         self.assertEqual(kwargs["env"]["BUILDKIT_PROGRESS"], "plain")
-        capture.assert_called_once_with(["docker", "compose", "images", "-q", "telegraf"])
+        capture.assert_called_once_with(["docker", "compose", "images", "-q", "telegraf"], check=False, quiet=True)
 
     def test_ensure_snmp_image_shows_build_output_on_failure(self):
         error = subprocess.CalledProcessError(1, ["docker"], output="failed to get console\n")
@@ -285,22 +285,52 @@ class VendorAndImageTests(TempProjectMixin, unittest.TestCase):
         self.assertIn("failed to get console", stderr.getvalue())
 
     def test_ensure_snmp_image_falls_back_to_image_inspect(self):
+        # Fresh install unpacked from the GitHub archive: no container yet,
+        # `docker compose images` fails (Compose v5.1) and the project is
+        # named after the FW-Monitoring-main directory.
+        config = '{"name": "fw-monitoring-main", "services": {"telegraf": {"build": {}}}}'
         with mock.patch.object(generate, "SNMP_IMAGE", ""), mock.patch.object(generate, "run"), mock.patch.object(
-            generate, "capture", side_effect=["", "sha256:feed\n"]
+            generate, "capture", side_effect=["", config, "sha256:feed\n"]
         ) as capture:
             self.assertTrue(generate.ensure_snmp_image())
             self.assertEqual(generate.SNMP_IMAGE, "sha256:feed")
         self.assertEqual(
             capture.call_args_list[1],
+            mock.call(["docker", "compose", "config", "--no-interpolate", "--format", "json"], check=False, quiet=True),
+        )
+        self.assertEqual(
+            capture.call_args_list[2],
             mock.call(
-                ["docker", "image", "inspect", "fw-monitoring-telegraf", "--format", "{{.Id}}"],
+                ["docker", "image", "inspect", "fw-monitoring-main-telegraf", "--format", "{{.Id}}"],
                 check=False,
             ),
         )
 
-    def test_ensure_snmp_image_reports_missing_image(self):
+    def test_ensure_snmp_image_uses_explicit_service_image_name(self):
+        config = '{"name": "x", "services": {"telegraf": {"image": "my/telegraf:local"}}}'
         with mock.patch.object(generate, "SNMP_IMAGE", ""), mock.patch.object(generate, "run"), mock.patch.object(
-            generate, "capture", side_effect=["\n", ""]
+            generate, "capture", side_effect=["", config, "sha256:beef\n"]
+        ) as capture:
+            self.assertTrue(generate.ensure_snmp_image())
+        self.assertEqual(capture.call_args_list[2].args[0][3], "my/telegraf:local")
+
+    def test_ensure_snmp_image_keeps_legacy_name_as_last_resort(self):
+        with mock.patch.object(generate, "SNMP_IMAGE", ""), mock.patch.object(generate, "run"), mock.patch.object(
+            generate, "capture", side_effect=["", "not json", "sha256:cafe\n"]
+        ) as capture:
+            self.assertTrue(generate.ensure_snmp_image())
+            self.assertEqual(generate.SNMP_IMAGE, "sha256:cafe")
+        self.assertEqual(capture.call_args_list[2].args[0][3], "fw-monitoring-telegraf")
+
+    def test_compose_telegraf_image_name_handles_odd_config(self):
+        for raw, expected in (("[]", ""), ('{"services": {}}', ""), ('{"name": "p"}', "p-telegraf")):
+            with self.subTest(raw=raw), mock.patch.object(generate, "capture", return_value=raw):
+                self.assertEqual(generate.compose_telegraf_image_name(), expected)
+
+    def test_ensure_snmp_image_reports_missing_image(self):
+        config = '{"name": "fw-monitoring-main", "services": {"telegraf": {}}}'
+        with mock.patch.object(generate, "SNMP_IMAGE", ""), mock.patch.object(generate, "run"), mock.patch.object(
+            generate, "capture", side_effect=["\n", config, "", ""]
         ):
             self.assertFalse(generate.ensure_snmp_image())
             self.assertEqual(generate.SNMP_IMAGE, "")
