@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Palo Alto SNMP dashboards (standard and chassis) showed a steady load as a saw-tooth: a constant 97.5 Gb/s traffic-generator test read between 70 and 128 Gb/s. PAN-OS refreshes the IF-MIB `ifHCInOctets` / `ifHCOutOctets` counters in steps, about every 12 s on a PA-5580 (measured with a 1 s probe), out of phase with the 20 s poll, so each 20 s rate covered one or two refreshes. Throughput is now averaged over at least 2 minutes (or Grafana's interval when it is longer) in **Throughput Global Interfaces**, **Throughput ${interface}**, the Load Test peak tiles and the throughput lines of **Throughput vs Dataplane CPU**, whose CPU lines keep their 20 s resolution. **CPU vs Throughput** now plots one point per two minutes. Polling faster does not fix this and was not changed. Grafana reloads the provisioned files.
+
 ## 1.5.0 - 2026-09-24
 
 ### Added
