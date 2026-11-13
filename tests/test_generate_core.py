@@ -1,3 +1,4 @@
+import io
 import os
 import stat
 import subprocess
@@ -553,6 +554,13 @@ class GeneratorCoreTests(unittest.TestCase):
     def test_capture_propagates_command_failure(self):
         with self.assertRaises(subprocess.CalledProcessError):
             generate.capture(["sh", "-c", "exit 7"])
+
+    def test_capture_quiet_hides_stderr_of_a_hint_command(self):
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(generate.capture(["sh", "-c", "echo out; echo noise >&2; exit 1"], check=False, quiet=True), "out\n")
+            generate.capture(["sh", "-c", "echo shown >&2"], check=False)
+        self.assertNotIn("noise", stderr.getvalue())
+        self.assertIn("shown", stderr.getvalue())
 
 
 if __name__ == "__main__":

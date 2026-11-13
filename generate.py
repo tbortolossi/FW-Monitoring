@@ -113,7 +113,7 @@ def run(cmd, **kwargs):
     return subprocess.run([str(part) for part in cmd], check=True, **kwargs)
 
 
-def capture(cmd, check=True):
+def capture(cmd, check=True, quiet=False):
     result = subprocess.run(
         [str(part) for part in cmd],
         check=check,
@@ -121,7 +121,7 @@ def capture(cmd, check=True):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    if result.stderr:
+    if result.stderr and not quiet:
         sys.stderr.write(result.stderr)
     return result.stdout
 
@@ -664,14 +664,43 @@ def ensure_snmp_image():
         if exc.output:
             sys.stderr.write(exc.output)
         raise
-    images = capture(["docker", "compose", "images", "-q", "telegraf"]).splitlines()
+    # `docker compose images` only knows images of existing containers and
+    # exits non-zero on some Compose releases (v5.1) before the first `up`, so
+    # it is a hint only. The built image is then looked up by the name Compose
+    # gives it, which follows the project (directory) name: an install unpacked
+    # from the GitHub archive lives in FW-Monitoring-main, not fw-monitoring.
+    images = capture(["docker", "compose", "images", "-q", "telegraf"], check=False, quiet=True).splitlines()
     SNMP_IMAGE = images[0].strip() if images else ""
-    if not SNMP_IMAGE:
-        SNMP_IMAGE = capture(
-            ["docker", "image", "inspect", "fw-monitoring-telegraf", "--format", "{{.Id}}"],
-            check=False,
-        ).strip()
+    for lookup in (compose_telegraf_image_name, lambda: "fw-monitoring-telegraf"):
+        if SNMP_IMAGE:
+            break
+        name = lookup()
+        if name:
+            SNMP_IMAGE = capture(
+                ["docker", "image", "inspect", name, "--format", "{{.Id}}"],
+                check=False,
+            ).strip()
     return bool(SNMP_IMAGE)
+
+
+def compose_telegraf_image_name():
+    """Return the image name Compose builds for the telegraf service, or "".
+
+    `--no-interpolate` keeps `${VAR}` expressions unresolved, so no secret from
+    `.env` is read here; `env_file` contents are not part of this output either.
+    """
+    raw = capture(["docker", "compose", "config", "--no-interpolate", "--format", "json"], check=False, quiet=True)
+    try:
+        config = json.loads(raw)
+    except ValueError:
+        return ""
+    if not isinstance(config, dict):
+        return ""
+    service = (config.get("services") or {}).get("telegraf") or {}
+    if service.get("image"):
+        return str(service["image"])
+    project = config.get("name")
+    return f"{project}-telegraf" if project else ""
 
 
 # The snmp.conf is written inside the throwaway container only; the host and
