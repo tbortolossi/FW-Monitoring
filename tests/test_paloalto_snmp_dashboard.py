@@ -43,8 +43,10 @@ def pipelines(query):
 
 class PaloAltoSnmpThroughputWindowTests(unittest.TestCase):
     """PAN-OS refreshes IF-MIB octet counters in steps (about every 12 s on a PA-5580),
-    out of phase with the 20 s poll. A 20 s rate swings between ~0.5x and ~1.2x the real
-    load, so every SNMP throughput rate is averaged over at least 2 minutes."""
+    out of phase with the 20 s poll. A window catches a whole number of refreshes: a 20 s
+    rate swings between ~0.5x and ~1.2x the real load, a 2-minute one by ~10% and a
+    5-minute one by ~4%. Every SNMP throughput rate is averaged over the throughput_window
+    variable (2, 5 or 10 minutes, 5 by default) and only complete windows are drawn."""
 
     DASHBOARDS = ("Palo_Dashboard.json", "Palo_Chassis_Dashboard.json")
     WINDOWED_PANELS = (6, 7, 1301, 1302, 1311)
@@ -53,21 +55,38 @@ class PaloAltoSnmpThroughputWindowTests(unittest.TestCase):
         path = DASHBOARD_PATH.parent / name
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def test_throughput_rates_use_a_window_of_at_least_two_minutes(self):
+    def test_throughput_window_variable_defaults_to_five_minutes_and_explains_why(self):
+        for name in self.DASHBOARDS:
+            with self.subTest(dashboard=name):
+                variables = self.load(name)["templating"]["list"]
+                names = [item["name"] for item in variables]
+                self.assertEqual(names.index("throughput_window"), names.index("hostname") + 1)
+                variable = variables[names.index("throughput_window")]
+                self.assertEqual(variable["type"], "custom")
+                self.assertEqual(variable["hide"], 0)
+                self.assertEqual([o["value"] for o in variable["options"]], ["2m", "5m", "10m"])
+                self.assertEqual(variable["current"]["value"], "5m")
+                self.assertEqual([o["value"] for o in variable["options"] if o["selected"]], ["5m"])
+                self.assertIn("every 10 to 20 seconds", variable["description"])
+
+    def test_throughput_rates_use_the_selected_window(self):
         for name in self.DASHBOARDS:
             dashboard = self.load(name)
             for panel_id in self.WINDOWED_PANELS:
                 with self.subTest(dashboard=name, panel=panel_id):
                     query = find_panel(dashboard["panels"], panel_id)["targets"][0]["query"]
                     self.assertIn(
-                        "throughputWindow = if int(v: v.windowPeriod) > int(v: 2m) then v.windowPeriod else 2m",
+                        "throughputWindow = if int(v: v.windowPeriod) > int(v: ${throughput_window}) then v.windowPeriod else ${throughput_window}",
                         query,
                     )
+                    self.assertTrue(query.startswith('import "date"\n'))
+                    self.assertIn("throughputStart = date.sub(d: throughputWindow, from: v.timeRangeStart)", query)
                     octet_pipelines = [p for p in pipelines(query) if "Octets" in p and "derivative" in p]
                     self.assertTrue(octet_pipelines)
                     for pipeline in octet_pipelines:
                         self.assertIn("aggregateWindow(every: throughputWindow, fn: mean", pipeline)
                         self.assertNotIn("every: v.windowPeriod", pipeline)
+                        self.assert_complete_windows_only(pipeline)
 
     def test_cpu_series_of_the_load_ramp_keep_their_native_resolution(self):
         for name in self.DASHBOARDS:
@@ -78,12 +97,26 @@ class PaloAltoSnmpThroughputWindowTests(unittest.TestCase):
                 for pipeline in cpu:
                     self.assertIn("aggregateWindow(every: v.windowPeriod", pipeline)
 
-    def test_cpu_vs_throughput_scatter_uses_two_minute_points(self):
+    def assert_complete_windows_only(self, pipeline):
+        """The first window reads data from before the range; the window in progress is dropped."""
+        self.assertIn("|> range(start: throughputStart, stop: v.timeRangeStop)", pipeline)
+        lines = [line.strip() for line in pipeline.split("\n")]
+        aggregate = next(i for i, line in enumerate(lines) if line.startswith("|> aggregateWindow("))
+        self.assertEqual(
+            lines[aggregate + 1],
+            "|> filter(fn: (r) => r._time >= v.timeRangeStart and r._time < v.timeRangeStop)",
+        )
+
+    def test_cpu_vs_throughput_scatter_uses_one_point_per_selected_window(self):
         for name in self.DASHBOARDS:
             with self.subTest(dashboard=name):
                 query = find_panel(self.load(name)["panels"], 1312)["targets"][0]["query"]
-                self.assertEqual(query.count("aggregateWindow(every: 2m,"), 3)
-                self.assertNotIn("aggregateWindow(every: 1m,", query)
+                self.assertEqual(query.count("aggregateWindow(every: ${throughput_window},"), 3)
+                self.assertNotRegex(query, r"aggregateWindow\(every: [0-9]+m,")
+                self.assertIn("throughputStart = date.sub(d: ${throughput_window}, from: v.timeRangeStart)", query)
+                octets = [p for p in pipelines(query) if "Octets" in p]
+                self.assertEqual(len(octets), 1)
+                self.assert_complete_windows_only(octets[0])
 
 
 if __name__ == "__main__":
